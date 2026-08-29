@@ -95,4 +95,159 @@ TEST_MAIN_BEGIN
         CHECK(n == 1 && a[0].kind == DUCKY_CONSUMER && a[0].consumer == 0xE9, "MEDIA VOLUP");
         CHECK(ducky_parse_line(&st, "MEDIA NONSENSE", a, 64) == 0, "unknown media -> nothing");
     }
+
+    SUITE("lock keys: Caps Lock inverts letters, and only letters");
+    {
+        /* Caps Lock is the operating system's state, not the keyboard's, so a
+         * payload typing "Hello" into a host with it on produces "hELLO"
+         * unless the shift bit is flipped for letters. */
+        const uint8_t CAPS = HID_LED_CAPSLOCK;
+        CHECK(ducky_apply_caps(HID_KEY_A, 0, 0) == 0,
+              "caps off: a lowercase letter is unchanged");
+        CHECK(ducky_apply_caps(HID_KEY_A, 0, CAPS) == HID_MOD_LSHIFT,
+              "caps on: an unshifted letter gains shift, so it still types lowercase");
+        CHECK(ducky_apply_caps(HID_KEY_A, HID_MOD_LSHIFT, CAPS) == 0,
+              "caps on: a shifted letter loses shift, so it still types uppercase");
+
+        /* digits and punctuation must never be touched: Caps Lock does not
+         * affect them, and flipping shift would turn 1 into ! */
+        CHECK(ducky_apply_caps(HID_KEY_1, 0, CAPS) == 0, "digits are unaffected");
+        CHECK(ducky_apply_caps(HID_KEY_1, HID_MOD_LSHIFT, CAPS) == HID_MOD_LSHIFT,
+              "shifted digits are unaffected");
+        CHECK(ducky_apply_caps(HID_KEY_MINUS, 0, CAPS) == 0, "punctuation is unaffected");
+        CHECK(ducky_apply_caps(HID_KEY_ENTER, 0, CAPS) == 0, "named keys are unaffected");
+
+        /* other modifiers survive the flip */
+        CHECK(ducky_apply_caps(HID_KEY_A, HID_MOD_LCTRL, CAPS) == (HID_MOD_LCTRL|HID_MOD_LSHIFT),
+              "ctrl is preserved while shift flips");
+        /* the last letter of the alphabet is still a letter */
+        CHECK(ducky_apply_caps(HID_KEY_A + 25, 0, CAPS) == HID_MOD_LSHIFT, "Z is covered");
+        CHECK(ducky_apply_caps(HID_KEY_A + 26, 0, CAPS) == 0, "the key after Z is not");
+    }
+
+    SUITE("STRINGDELAY paces the characters of a line, not the whole payload");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        CHECK(st.string_delay_ms == 0, "off by default");
+
+        /* without it, five characters are five key actions */
+        int n = ducky_parse_line(&st, "STRING abcde", a, 64);
+        CHECK(n == 5, "5 chars -> 5 actions, got %d", n);
+
+        /* with it, a delay is interleaved BETWEEN characters: 5 keys + 4 gaps */
+        ducky_parse_line(&st, "STRINGDELAY 25", a, 64);
+        CHECK(st.string_delay_ms == 25, "STRINGDELAY parsed, got %lu",
+              (unsigned long)st.string_delay_ms);
+        n = ducky_parse_line(&st, "STRING abcde", a, 64);
+        CHECK(n == 9, "5 keys + 4 delays = 9 actions, got %d", n);
+        CHECK(a[0].kind == DUCKY_KEY,   "starts with a key, not a delay");
+        CHECK(a[1].kind == DUCKY_DELAY && a[1].delay_ms == 25, "delay between characters");
+        CHECK(a[8].kind == DUCKY_KEY,   "ends with a key, not a trailing delay");
+
+        /* a single character gets no delay at all */
+        n = ducky_parse_line(&st, "STRING z", a, 64);
+        CHECK(n == 1, "one character needs no pacing, got %d", n);
+
+        /* and it can be turned back off */
+        ducky_parse_line(&st, "STRINGDELAY 0", a, 64);
+        n = ducky_parse_line(&st, "STRING abcde", a, 64);
+        CHECK(n == 5, "STRINGDELAY 0 restores plain typing, got %d", n);
+    }
+
+    SUITE("DuckyScript: hyphenated chords, the classic 1.0 form");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        /* "CTRL-ALT-DELETE" must mean the same as "CTRL ALT DELETE" */
+        int n = ducky_parse_line(&st, "CTRL-ALT-DELETE", a, 8);
+        CHECK(n == 1, "one chord action, got %d", n);
+        CHECK(a[0].mods == (HID_MOD_LCTRL | HID_MOD_LALT), "both modifiers set");
+        CHECK(a[0].key == HID_KEY_DELETE, "and the DELETE key");
+
+        ducky_parse_line(&st, "CTRL ALT DELETE", a, 8);
+        uint8_t spaced_mods = a[0].mods, spaced_key = a[0].key;
+        ducky_parse_line(&st, "CTRL-ALT-DELETE", a, 8);
+        CHECK(a[0].mods == spaced_mods && a[0].key == spaced_key,
+              "hyphenated and spaced forms are identical");
+
+        ducky_parse_line(&st, "GUI-r", a, 8);
+        CHECK(a[0].mods == HID_MOD_LGUI && a[0].key == (HID_KEY_A + 17), "GUI-r");
+        ducky_parse_line(&st, "ALT-F4", a, 8);
+        CHECK(a[0].mods == HID_MOD_LALT && a[0].key == HID_KEY_F1 + 3, "ALT-F4");
+
+        /* a lone minus is still the minus KEY, not a separator */
+        n = ducky_parse_line(&st, "STRING -", a, 8);
+        CHECK(n == 1 && a[0].key == HID_KEY_MINUS, "a bare '-' still types");
+    }
+
+    SUITE("DuckyScript: REM_BLOCK swallows everything until END_REM");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        CHECK(ducky_parse_line(&st, "REM_BLOCK", a, 8) == 0, "block opens silently");
+        CHECK(ducky_parse_line(&st, "STRING this must not type", a, 8) == 0,
+              "commands inside a block produce nothing");
+        CHECK(ducky_parse_line(&st, "CTRL ALT DELETE", a, 8) == 0,
+              "not even a chord escapes the block");
+        CHECK(ducky_parse_line(&st, "END_REM", a, 8) == 0, "block closes");
+        /* "now it types" is 12 characters, so 12 key actions. */
+        CHECK(ducky_parse_line(&st, "STRING now it types", a, 32) == 12,
+              "and normal parsing resumes");
+    }
+
+    SUITE("DuckyScript: HOLD / RELEASE / RESET");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        int n = ducky_parse_line(&st, "HOLD CTRL", a, 8);
+        CHECK(n == 1 && a[0].kind == DUCKY_HOLD && a[0].mods == HID_MOD_LCTRL,
+              "HOLD CTRL keeps ctrl down");
+        n = ducky_parse_line(&st, "HOLD CTRL-SHIFT", a, 8);
+        CHECK(a[0].mods == (HID_MOD_LCTRL|HID_MOD_LSHIFT), "HOLD takes hyphenated modifiers");
+        n = ducky_parse_line(&st, "RELEASE", a, 8);
+        CHECK(n == 1 && a[0].kind == DUCKY_RELEASE, "RELEASE lets go");
+        n = ducky_parse_line(&st, "RESET", a, 8);
+        CHECK(n == 1 && a[0].kind == DUCKY_RELEASE, "RESET clears held keys too");
+    }
+
+    SUITE("DuckyScript: WAIT_FOR_* lock-key conditions");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        int n = ducky_parse_line(&st, "WAIT_FOR_CAPS_ON", a, 8);
+        CHECK(n == 1 && a[0].kind == DUCKY_WAIT, "produces a wait action");
+        CHECK(a[0].wait_mask == HID_LED_CAPSLOCK && a[0].wait_want == 1, "caps, on");
+        ducky_parse_line(&st, "WAIT_FOR_NUM_OFF", a, 8);
+        CHECK(a[0].wait_mask == HID_LED_NUMLOCK && a[0].wait_want == 0, "num, off");
+        ducky_parse_line(&st, "WAIT_FOR_SCROLL_CHANGE", a, 8);
+        CHECK(a[0].wait_mask == HID_LED_SCROLL && a[0].wait_want == 2, "scroll, change");
+    }
+
+    SUITE("DuckyScript: RANDOM_* types one character of the right class");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        for (int i = 0; i < 40; i++) {
+            int n = ducky_parse_line(&st, "RANDOM_NUMBER", a, 8);
+            if (n != 1 || a[0].key < HID_KEY_1 || a[0].key > HID_KEY_0) {
+                CHECK(false, "RANDOM_NUMBER produced a non-digit on iteration %d", i);
+                break;
+            }
+        }
+        CHECK(true, "40 random digits were all digits");
+        int n = ducky_parse_line(&st, "RANDOM_LOWERCASE_LETTER", a, 8);
+        CHECK(n == 1 && (a[0].mods & HID_MOD_LSHIFT) == 0, "lowercase is unshifted");
+        n = ducky_parse_line(&st, "RANDOM_UPPERCASE_LETTER", a, 8);
+        CHECK(n == 1 && (a[0].mods & HID_MOD_LSHIFT) != 0, "uppercase is shifted");
+        CHECK(ducky_parse_line(&st, "RANDOM_CHAR", a, 8) == 1, "RANDOM_CHAR types something");
+    }
+
+    SUITE("DuckyScript: extra key names and mac aliases");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        uint8_t k = 0;
+        CHECK(hid_named_key("NUMLOCK", &k) && k == HID_KEY_NUMLOCK, "NUMLOCK");
+        CHECK(hid_named_key("SCROLLLOCK", &k) && k == HID_KEY_SCROLLLOCK, "SCROLLLOCK");
+        CHECK(hid_named_key("PAUSE", &k) && k == HID_KEY_PAUSE, "PAUSE");
+        CHECK(hid_named_key("BREAK", &k) && k == HID_KEY_PAUSE, "BREAK is PAUSE");
+        uint8_t m = 0;
+        CHECK(hid_modifier("OPTION", &m) && m == HID_MOD_LALT, "OPTION is ALT (mac)");
+        CHECK(hid_modifier("CMD", &m) && m == HID_MOD_LGUI, "CMD is GUI (mac)");
+        CHECK(hid_modifier("COMMAND", &m) && m == HID_MOD_LGUI, "COMMAND is GUI");
+    }
 TEST_MAIN_END

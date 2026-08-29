@@ -56,9 +56,10 @@ bool hid_modifier(const char *tok, uint8_t *modbit)
     uint8_t m = 0;
     if (ieq(tok, "CTRL") || ieq(tok, "CONTROL"))                 m = HID_MOD_LCTRL;
     else if (ieq(tok, "SHIFT"))                                  m = HID_MOD_LSHIFT;
-    else if (ieq(tok, "ALT"))                                    m = HID_MOD_LALT;
+    else if (ieq(tok, "ALT") || ieq(tok, "OPTION"))              m = HID_MOD_LALT;
     else if (ieq(tok, "GUI") || ieq(tok, "WINDOWS") ||
-             ieq(tok, "WIN")  || ieq(tok, "COMMAND") || ieq(tok, "META")) m = HID_MOD_LGUI;
+             ieq(tok, "WIN")  || ieq(tok, "COMMAND") ||
+             ieq(tok, "CMD")  || ieq(tok, "META"))               m = HID_MOD_LGUI;
     else return false;
     if (modbit) *modbit = m;
     return true;
@@ -83,6 +84,9 @@ bool hid_named_key(const char *tok, uint8_t *key)
     else if (ieq(tok, "LEFT") || ieq(tok, "LEFTARROW")) k = HID_KEY_LEFT;
     else if (ieq(tok, "RIGHT") || ieq(tok, "RIGHTARROW")) k = HID_KEY_RIGHT;
     else if (ieq(tok, "CAPSLOCK") || ieq(tok, "CAPS")) k = HID_KEY_CAPS;
+    else if (ieq(tok, "NUMLOCK"))                     k = HID_KEY_NUMLOCK;
+    else if (ieq(tok, "SCROLLLOCK") || ieq(tok, "SCROLL")) k = HID_KEY_SCROLLLOCK;
+    else if (ieq(tok, "PAUSE") || ieq(tok, "BREAK"))  k = HID_KEY_PAUSE;
     else if (ieq(tok, "MENU") || ieq(tok, "APP"))     k = HID_KEY_MENU;
     else if (ieq(tok, "PRINTSCREEN") || ieq(tok, "PRTSCR")) k = HID_KEY_PRTSCR;
     else if ((tok[0] == 'F' || tok[0] == 'f') && tok[1]) {

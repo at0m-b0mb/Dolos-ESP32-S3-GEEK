@@ -1,0 +1,42 @@
+REM ============================================================
+REM  Dolos navigation-key test
+REM
+REM  Exercises named keys and modifiers using ONLY editing keys
+REM  that are harmless in a text editor. No GUI/Run dialog, no
+REM  commands. Open a text editor and fire.
+REM ============================================================
+DEFAULTDELAY 40
+DELAY 1500
+
+STRING === KEY TEST START ===
+ENTER
+STRING abcdef
+REM  HOME then type a marker: the marker must land at the START
+HOME
+STRING [start]
+END
+STRING [end]
+ENTER
+
+REM  arrows: type 12345, walk left three, insert a dash
+STRING 12345
+LEFT
+LEFT
+LEFT
+STRING -
+END
+ENTER
+
+REM  backspace: types "keepXX" then removes the XX
+STRING keepXX
+BACKSPACE
+BACKSPACE
+ENTER
+
+REM  tab (indent) then text
+TAB
+STRING indented-by-one-tab
+ENTER
+
+STRING === KEY TEST END ===
+ENTER

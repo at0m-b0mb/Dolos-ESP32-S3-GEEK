@@ -138,4 +138,51 @@ TEST_MAIN_BEGIN
         cv.oob = 0; dui_render(&cv, &st);
         CHECK(cv.oob == 0, "console screen with no credentials still renders, oob=%u", cv.oob);
     }
+
+    SUITE("dui: the console screen rows do not collide when the password is hidden");
+    {
+        dolos_config_t c4; config_defaults(&c4); c4.wifi_on = true;
+        st.mode = DUI_INFO; st.cfg = &c4; st.wifi_on = true;
+        st.wifi_ssid = "Dolos-7C21"; st.wifi_key = "7HHLUYVW2NXKUCWL";
+        st.admin_user = "admin"; st.admin_pw = "CA86H6W559ZTPR";
+
+        /* masked: the hint used to be drawn on the same row as the URL, which
+         * produced "HOLD:/:REVEAL8.4.1" on the real device */
+        st.admin_pw_masked = true;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "masked console screen fits, oob=%u", cv.oob);
+
+        st.admin_pw_masked = false;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "revealed console screen fits, oob=%u", cv.oob);
+    }
+
+    SUITE("font: every character the UI actually draws has a glyph");
+    {
+        /* The password mask was drawn with '*', which had no glyph in the large
+         * face and therefore rendered as blank - the screen simply showed
+         * nothing where the password should be. */
+        const char *used = "*.:/@_-";
+        int missing = 0;
+        for (const char *p = used; *p; p++) {
+            int idx = (*p - FONT7X12_FIRST) * FONT7X12_H;
+            int on = 0;
+            for (int r = 0; r < FONT7X12_H; r++) if (aegis_font7x12[idx + r]) on = 1;
+            if (!on) { missing++; }
+        }
+        CHECK(missing == 0, "%d symbol(s) the UI uses have no glyph", missing);
+    }
+
+    SUITE("dui: the restart notice fits, including long text");
+    {
+        cv.oob = 0;
+        dui_render_notice(&cv, "NEW CREDENTIALS", "RESTARTING - REJOIN WITH", "THE NEW KEY ON SCREEN");
+        CHECK(cv.oob == 0, "new-credentials notice fits, oob=%u", cv.oob);
+        cv.oob = 0;
+        dui_render_notice(&cv, "FACTORY RESET", "ERASING SETTINGS AND", "CREDENTIALS - RESTARTING");
+        CHECK(cv.oob == 0, "factory-reset notice fits, oob=%u", cv.oob);
+        cv.oob = 0;
+        dui_render_notice(&cv, "X", NULL, NULL);
+        CHECK(cv.oob == 0, "a notice with no body still renders");
+    }
 TEST_MAIN_END

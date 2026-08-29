@@ -91,9 +91,13 @@ TEST_MAIN_BEGIN
         CHECK(back.ui_lock == UI_LOCK_FULL, "ui_lock level survived, got %d", back.ui_lock);
         CHECK(strcmp(back.arm_pin, "1234") == 0, "arm pin survived, got '%s'", back.arm_pin);
         CHECK(strcmp(back.wifi_ssid, "Dolos-TEST") == 0, "ssid survived, got '%s'", back.wifi_ssid);
-        CHECK(strcmp(back.wifi_pass, "hunter2hunter2") == 0, "wifi pass survived");
         CHECK(strcmp(back.admin_user, "root") == 0, "admin user survived");
-        CHECK(strcmp(back.admin_pass, "s3cret") == 0, "admin pass survived");
+        /* Secrets deliberately do NOT survive: they are never written to the
+         * card. This assertion used to require the opposite - it encoded the
+         * behaviour that put the Wi-Fi key and console password in plaintext on
+         * removable media, so it is inverted here on purpose. */
+        CHECK(back.wifi_pass[0] == 0, "wifi key is NOT written to the card");
+        CHECK(back.admin_pass[0] == 0, "console password is NOT written to the card");
     }
 
     SUITE("config: a buffer that is too small fails loudly rather than truncating");
@@ -102,5 +106,33 @@ TEST_MAIN_BEGIN
         char tiny[16];
         CHECK(config_write_text(&c, tiny, sizeof(tiny)) == 0, "reports failure, writes no half-config");
         CHECK(config_write_text(&c, tiny, 0) == 0, "zero capacity is handled");
+    }
+
+    SUITE("config: secrets are NEVER written to the SD card");
+    {
+        dolos_config_t c; config_defaults(&c);
+        strcpy(c.wifi_ssid,  "Dolos-7C21");
+        strcpy(c.wifi_pass,  "SUPERSECRETWIFIKEY");
+        strcpy(c.admin_user, "admin");
+        strcpy(c.admin_pass, "SUPERSECRETADMINPW");
+        char out[1024];
+        size_t n = config_write_text(&c, out, sizeof(out));
+        CHECK(n > 0, "config serialises");
+        /* An SD card is removable and readable on any laptop. Whatever else
+         * this file contains, it must not contain these. */
+        CHECK(strstr(out, "SUPERSECRETWIFIKEY") == NULL,
+              "the Wi-Fi key must not appear in DOLOS.CFG");
+        CHECK(strstr(out, "SUPERSECRETADMINPW") == NULL,
+              "the console password must not appear in DOLOS.CFG");
+        /* non-secret settings still round-trip */
+        CHECK(strstr(out, "wifi_ssid=Dolos-7C21") != NULL, "the SSID is still saved");
+        CHECK(strstr(out, "admin_user=admin") != NULL, "the username is still saved");
+
+        dolos_config_t back; config_defaults(&back);
+        config_parse(out, &back);
+        CHECK(back.layout == c.layout && back.speed == c.speed,
+              "settings survive the round trip");
+        CHECK(back.wifi_pass[0] == 0,
+              "a reloaded file carries no key - the device uses the one in NVS");
     }
 TEST_MAIN_END

@@ -49,8 +49,12 @@ typedef struct {
     const char *admin_user;    /* console username                            */
     const char *admin_pw;      /* console password (NULL to hide)             */
     bool     remote_fire_enabled; /* admin allowed remote fire -> banner  */
+    bool     admin_pw_masked;  /* hide the console password (already used)  */
+    bool     info_big;         /* console screen: large credential view    */
     int      menu_sel;         /* highlighted settings row (DUI_MENU)     */
     const dolos_config_t *cfg; /* live settings, shown in the menu        */
+    bool     degraded;         /* a previous boot crashed                  */
+    bool     console_up;       /* HTTP console actually running            */
     bool     safe_boot;        /* last boot crashed: optional subsystems off */
     ui_lock_t ui_lock;         /* how much of the UI the button may reach */
     int      lint_problems;    /* >0 = payload has errors, arming blocked */
@@ -61,6 +65,11 @@ typedef struct {
 
 void dui_render(canvas_t *cv, const dui_state_t *st);
 void dui_render_splash(canvas_t *cv);
+
+/* A full-screen message. Used before a deliberate restart so that rebooting
+ * reads as an action the device is taking, not as a crash. */
+void dui_render_notice(canvas_t *cv, const char *title,
+                       const char *line1, const char *line2);
 
 #ifdef __cplusplus
 }

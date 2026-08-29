@@ -1,0 +1,72 @@
+REM ============================================================
+REM  Dolos self-test payload
+REM
+REM  Types ONLY text into whatever has focus. No launcher, no
+REM  commands, nothing that executes. Open a plain text editor,
+REM  put the cursor in it, and fire.
+REM
+REM  Every line is built so a single dropped character is
+REM  obvious at a glance: the rulers are counted, the alphabet
+REM  is in order, and the repeat blocks have a known length.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === DOLOS SELF TEST START ===
+ENTER
+ENTER
+
+REM --- 1. counting rulers. A missing character shifts the digits ---
+STRING ruler10 0123456789
+ENTER
+STRING ruler40 0123456789012345678901234567890123456789
+ENTER
+STRING ruler80 01234567890123456789012345678901234567890123456789012345678901234567890123456789
+ENTER
+ENTER
+
+REM --- 2. the alphabet, both cases. Any gap is visible instantly ---
+STRING lower   abcdefghijklmnopqrstuvwxyz
+ENTER
+STRING upper   ABCDEFGHIJKLMNOPQRSTUVWXYZ
+ENTER
+ENTER
+
+REM --- 3. every printable symbol the US layout can produce ---
+STRING sym1    !"#$%&'()*+,-./
+ENTER
+STRING sym2    :;<=>?@
+ENTER
+STRING sym3    [\]^_`
+ENTER
+STRING sym4    {|}~
+ENTER
+ENTER
+
+REM --- 4. doubled letters: these expose a keyboard that cannot ---
+REM     send the same key twice in a row without a release       ---
+STRING doubles aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp
+ENTER
+STRING words   letter bookkeeper aardvark committee successfully
+ENTER
+ENTER
+
+REM --- 5. shift transitions, the case the parser is most likely to fumble ---
+STRING shift   aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ
+ENTER
+STRING mixed   The Quick Brown Fox Jumps Over The Lazy Dog 0123456789
+ENTER
+ENTER
+
+REM --- 6. REPEAT: the next line should appear exactly ten times ---
+STRINGLN repeat-line
+REPEAT 9
+ENTER
+
+REM --- 7. a long unbroken line, to stress the report pacing ---
+STRING longline_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_end
+ENTER
+ENTER
+
+STRING === DOLOS SELF TEST END ===
+ENTER

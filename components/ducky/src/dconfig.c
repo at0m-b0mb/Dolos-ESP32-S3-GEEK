@@ -33,7 +33,28 @@ const char *speed_name(dolos_speed_t s)
 }
 uint8_t speed_key_delay_ms(dolos_speed_t s)
 {
-    switch (s) { case SPEED_FAST: return 1; case SPEED_RELIABLE: return 8; default: return 3; }
+    /* Per-keystroke half-delay, in milliseconds.
+     *
+     * These numbers are from hardware, not theory. On a real macOS host, 5 ms
+     * ("balanced" as it was) dropped the SAME characters in five consecutive
+     * runs - the host coalesces reports that arrive faster than it samples, and
+     * no amount of retrying on our side helps, because the report IS accepted;
+     * it just never becomes a keystroke. 10 ms typed the identical payload
+     * perfectly five times out of five.
+     *
+     * So the profiles are re-tuned around that measurement, and the default is
+     * the one that was observed to work. A tool whose whole job is typing
+     * accurately should not ship a default that silently loses characters -
+     * a dropped letter in a command is worse than a slower payload. */
+    /* Extra settle margin in milliseconds ON TOP of host-clocked pacing.
+     * Delivery is confirmed for every report, so even zero is accurate; the
+     * slower profiles simply give a host more time to act on a keystroke
+     * before the next one arrives. */
+    switch (s) {
+        case SPEED_FAST:     return 0;    /* host speed, nothing added   */
+        case SPEED_RELIABLE: return 8;    /* generous margin             */
+        default:             return 2;    /* balanced                    */
+    }
 }
 
 static int ieq(const char *a, const char *b)
@@ -56,6 +77,21 @@ const char *ui_lock_key(ui_lock_t l)
 {
     switch (l) { case UI_LOCK_FULL: return "full"; case UI_LOCK_MENU: return "menu";
                  default: return "off"; }
+}
+
+bool config_key_known(const char *key)
+{
+    static const char *KNOWN[] = {
+        "layout", "os", "target_os", "speed", "dryrun", "defaultdelay",
+        "armpin", "pin", "ui_lock", "lock_ui",
+        "usb_vid", "usb_pid", "usb_mfr", "usb_product",
+        "wifi", "wifi_ssid", "ssid", "wifi_pass", "wifi_password",
+        "admin_user", "admin_pass", "admin_password", "remote_fire",
+        NULL
+    };
+    if (!key) return false;
+    for (int i = 0; KNOWN[i]; i++) if (ieq(key, KNOWN[i])) return true;
+    return false;
 }
 
 void config_parse(const char *text, dolos_config_t *c)

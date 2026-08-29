@@ -58,6 +58,11 @@ typedef struct {
 } dolos_config_t;
 
 void config_defaults(dolos_config_t *c);
+
+/* Is this a key the parser understands? The console needs to tell "I do not
+ * know that setting" apart from "you set it to the value it already had" -
+ * reporting the second as an error made valid changes look broken. */
+bool config_key_known(const char *key);
 void config_parse(const char *text, dolos_config_t *c);   /* merges over defaults */
 const char *speed_name(dolos_speed_t s);
 /* per-keystroke half-delay (ms) for each speed profile */

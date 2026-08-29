@@ -88,12 +88,20 @@ static const char *speed_key(dolos_speed_t s)
 size_t config_write_text(const dolos_config_t *c, char *out, size_t cap)
 {
     if (!out || cap == 0) return 0;
-    /* Written in the same key=value form config_parse() reads, so saving from
-     * the menu and reloading at boot round-trip exactly. Secrets are included
-     * because this file IS the device's configuration store - it is the SD card
-     * that must be protected, not this writer. */
+    /* Written in the same key=value form config_parse() reads, so saving and
+     * reloading round-trip exactly - with ONE deliberate exception: secrets are
+     * omitted. The card is removable and readable on any laptop, so it is the
+     * wrong place for the Wi-Fi key and the console password; those stay in the
+     * device's NVS. The file still parses, because both keys are optional. */
     int n = snprintf(out, cap,
-        "# DOLOS.CFG - written by the on-device settings menu\n"
+        "# DOLOS.CFG - written by Dolos (device menu or web console).\n"
+        "#\n"
+        "# NOTE: the Wi-Fi key and console password are deliberately NOT written\n"
+        "# here. They live in the device's own flash (NVS). An SD card is\n"
+        "# removable: anyone who takes it can read a text file on any laptop,\n"
+        "# and desktop operating systems index and back cards up automatically.\n"
+        "# Reading credentials from this file is still supported if you set them\n"
+        "# yourself, but Dolos will never write its generated ones back to it.\n"
         "layout=%s\n"
         "os=%s\n"
         "speed=%s\n"
@@ -102,15 +110,13 @@ size_t config_write_text(const dolos_config_t *c, char *out, size_t cap)
         "armpin=%s\n"
         "wifi=%s\n"
         "wifi_ssid=%s\n"
-        "wifi_pass=%s\n"
         "admin_user=%s\n"
-        "admin_pass=%s\n"
         "remote_fire=%s\n"
         "ui_lock=%s\n",
         layout_key(c->layout), os_key(c->os), speed_key(c->speed),
         c->dry_run ? "on" : "off", (unsigned long)c->default_delay_ms,
         c->arm_pin, c->wifi_on ? "ap" : "off",
-        c->wifi_ssid, c->wifi_pass, c->admin_user, c->admin_pass,
+        c->wifi_ssid, c->admin_user,
         c->remote_fire ? "on" : "off", ui_lock_key(c->ui_lock));
     if (n < 0 || (size_t)n >= cap) return 0;      /* truncated: report failure */
     return (size_t)n;

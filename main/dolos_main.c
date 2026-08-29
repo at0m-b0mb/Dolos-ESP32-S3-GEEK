@@ -34,15 +34,16 @@
 #include "dconfig.h"
 #include "layout.h"
 #include "lint.h"
+#include "unicode.h"   /* os_name */
 #include "menu.h"
 #include "button.h"
 #include "nvs.h"
 #include "esp_random.h"
-#include "bootloader_random.h"
 #include "esp_system.h"
 #include "net_wifi.h"
 #include "console_server.h"
 #include "console_bridge.h"
+#include "sbuf.h"
 
 static const char *TAG = "dolos";
 
@@ -77,10 +78,17 @@ static SemaphoreHandle_t s_lock;
 static volatile bool     g_remote_fire_enabled;
 static volatile int      g_remote_req;      /* 0 none, 1 arm, 2 abort */
 static bool              g_wifi_up;
+static bool              g_console_up;
+/* Once someone has logged in, the admin password has done its job and should
+ * not keep sitting on a screen anyone can pick up and read. Persisted, so it
+ * stays hidden across reboots; HOLD on the console screen reveals it again,
+ * and a factory reset (or NEW CREDENTIALS) brings back a fresh one to show. */
+static bool              g_console_used;
 /* Boot-loop guard: if the last boot crashed, come up minimal rather than
  * repeating the crash forever. A device that bricks itself on a bad setting is
  * worse than one that boots without its radio and says so. */
 static bool              g_safe_boot;
+static uint8_t           g_crashes;   /* consecutive crashed boots */
 static uint32_t          g_boot_ms;
 static char              g_admin_pw_show[20];
 
@@ -117,7 +125,11 @@ static void scan_payloads(void)
     if (!d) return;
     struct dirent *e;
     while ((e = readdir(d)) && s_npayloads < MAX_PAYLOADS) {
-        if (e->d_name[0] == '.') continue;
+        /* Hidden and macOS resource-fork files are never payloads. The
+         * leading-dot test only works with long filenames enabled; the
+         * underscore test catches the 8.3 mangling ("._X.TXT" -> "_X~1.TXT")
+         * in case a card is ever read without them. */
+        if (e->d_name[0] == '.' || e->d_name[0] == '_') continue;
         if (!ends_txt(e->d_name)) continue;
         strncpy(s_names[s_npayloads], e->d_name, sizeof(s_names[0]) - 1);
         s_names[s_npayloads][sizeof(s_names[0]) - 1] = 0;
@@ -151,6 +163,49 @@ static void load_selected(void)
                  s_payload_name, s_lint_problems, s_lint_first.line, s_lint_first.msg);
 }
 
+/* ---- boot log to the SD card ----
+ *
+ * This device hides its serial port by design: TinyUSB takes the USB pins for
+ * HID, so ESP_LOG output - including a panic - goes to a port that no longer
+ * exists. With a card present we can keep the evidence instead: every log line
+ * from boot is teed to /sdcard/DOLOS_BOOT.LOG and flushed immediately, so the
+ * LAST LINE IN THE FILE is the last thing that happened before a crash.
+ * Logging stops once the UI is up, so it costs nothing at run time. */
+static FILE *s_bootlog;
+static vprintf_like_t s_prev_vprintf;
+
+static int bootlog_vprintf(const char *fmt, va_list ap)
+{
+    if (s_bootlog) {
+        va_list cp;
+        va_copy(cp, ap);
+        vfprintf(s_bootlog, fmt, cp);
+        va_end(cp);
+        fflush(s_bootlog);          /* a crash must not lose the last line */
+    }
+    return s_prev_vprintf ? s_prev_vprintf(fmt, ap) : 0;
+}
+
+static void bootlog_open(void)
+{
+    if (!s_sd_ok) return;
+    s_bootlog = fopen("/sdcard/DOLOS_BOOT.LOG", "a");
+    if (!s_bootlog) return;
+    fprintf(s_bootlog, "\n===== boot: reset_reason=%d =====\n", (int)esp_reset_reason());
+    fflush(s_bootlog);
+    s_prev_vprintf = esp_log_set_vprintf(bootlog_vprintf);
+}
+
+static void bootlog_close(void)
+{
+    if (!s_bootlog) return;
+    fprintf(s_bootlog, "===== boot completed, UI running =====\n");
+    fflush(s_bootlog);
+    if (s_prev_vprintf) esp_log_set_vprintf(s_prev_vprintf);
+    fclose(s_bootlog);
+    s_bootlog = NULL;
+}
+
 /* ---- audit log ---- */
 static void audit_write(bool aborted)
 {
@@ -174,7 +229,8 @@ static btn_evt_t button_event(void)
 
 /* ---- settings menu state ---- */
 static int  s_menu_sel;
-static bool s_cfg_dirty;          /* changed but not yet written to the card */
+static bool s_cfg_dirty;     /* changed but not yet written to the card */
+static bool s_info_reveal;   /* console screen: temporarily show a hidden password */
 
 /* Write the live settings back to /sdcard/DOLOS.CFG. */
 static bool config_save(void)
@@ -206,11 +262,29 @@ static void payload_task(void *arg)
 {
     (void)arg;
     payload_ctx_t ctx = { .abort = &s_abort, .progress = on_progress, .user = NULL,
+                          .name = s_payload_name,
                           .layout = s_cfg.layout, .os = s_cfg.os, .dry_run = s_cfg.dry_run,
                           .default_delay = s_cfg.default_delay_ms };
     s_last_lines = payload_run(s_payload, &ctx);
     s_run_done = true;
     vTaskDelete(NULL);
+}
+
+/* Is the device free to start a payload?
+ *
+ * SAFE is the obvious one, but SENT (the screen shown for a few seconds after a
+ * run), SETTINGS and CONSOLE INFO are all idle too - nothing is being typed on
+ * any of them. Refusing to fire because the operator happened to be reading the
+ * console screen produced "Device is busy" when nothing was busy at all.
+ * Genuinely busy is PIN entry, ARMED, the countdown, and RUNNING.
+ *
+ * This lives in one place because the check used to exist twice, in the bridge
+ * and again in the UI task, and they disagreed: the bridge accepted a request
+ * from SENT that the UI task then silently discarded, so the console reported a
+ * successful arm that never fired. */
+static bool mode_is_idle(dui_mode_t m)
+{
+    return m == DUI_SAFE || m == DUI_DONE || m == DUI_MENU || m == DUI_INFO;
 }
 
 /* ---- console bridge (called from the httpd task; guarded by s_lock) ---- */
@@ -244,12 +318,13 @@ void bridge_status_json(char *buf, size_t cap)
 int bridge_list_payloads(char *out, size_t cap)
 {
     lock();
-    int o = snprintf(out, cap, "{\"payloads\":[");
-    for (int i = 0; i < s_npayloads && o < (int)cap - 72; i++)
-        o += snprintf(out + o, cap - o, "%s\"%s\"", i ? "," : "", s_names[i]);
-    o += snprintf(out + o, cap - o, "]}");
+    sbuf_t sb; sbuf_init(&sb, out, cap);
+    sappend(&sb, "{\"payloads\":[");
+    for (int i = 0; i < s_npayloads; i++)
+        sappend(&sb, "%s\"%s\"", i ? "," : "", s_names[i]);
+    sappend(&sb, "]}");
     unlock();
-    return o;
+    return (int)sbuf_len(&sb);
 }
 int bridge_read_payload(const char *name, char *buf, size_t cap)
 {
@@ -264,7 +339,13 @@ bool bridge_write_payload(const char *name, const char *data, size_t len)
     if (!safe_name(name) || !s_sd_ok || !ends_txt(name)) return false;
     char path[96]; snprintf(path, sizeof(path), "/sdcard/%s", name);
     FILE *fp = fopen(path, "w"); if (!fp) return false;
-    fwrite(data, 1, len, fp); fclose(fp);
+    size_t wrote = fwrite(data, 1, len, fp);
+    fclose(fp);
+    if (wrote != len) {           /* card full or removed: do not claim success */
+        ESP_LOGE(TAG, "payload write truncated (%u of %u bytes)",
+                 (unsigned)wrote, (unsigned)len);
+        return false;
+    }
     lock(); scan_payloads(); load_selected(); unlock();
     return true;
 }
@@ -273,15 +354,74 @@ void bridge_get_config_text(char *buf, size_t cap)
     buf[0] = 0;
     if (!s_sd_ok) return;
     FILE *fp = fopen("/sdcard/DOLOS.CFG", "r"); if (!fp) return;
-    char line[160]; size_t o = 0;
-    while (fgets(line, sizeof(line), fp) && o < cap - 80) {
+    char line[160];
+    sbuf_t sb; sbuf_init(&sb, buf, cap);
+    while (fgets(line, sizeof(line), fp) && !sbuf_truncated(&sb)) {
         const char *red = NULL;
         if (strstr(line, "wifi_pass") == line || strstr(line, "wifi_password") == line) red = "wifi_pass=***\n";
         else if (strstr(line, "admin_pass") == line || strstr(line, "admin_password") == line) red = "admin_pass=***\n";
-        o += snprintf(buf + o, cap - o, "%s", red ? red : line);
+        sappend(&sb, "%s", red ? red : line);
     }
     fclose(fp);
 }
+void bridge_settings_json(char *buf, size_t cap)
+{
+    lock();
+    snprintf(buf, cap,
+        "{\"layout\":\"%s\",\"os\":\"%s\",\"speed\":\"%s\","
+        "\"dryrun\":%s,\"defaultdelay\":%lu,\"armpin\":%s,"
+        "\"uilock\":\"%s\",\"wifi\":%s,\"remotefire\":%s,"
+        "\"wifi_ssid\":\"%s\",\"sd\":%s}",
+        layout_name(s_cfg.layout), os_name(s_cfg.os), speed_name(s_cfg.speed),
+        s_cfg.dry_run ? "true" : "false", (unsigned long)s_cfg.default_delay_ms,
+        s_cfg.arm_pin[0] ? "true" : "false", ui_lock_key(s_cfg.ui_lock),
+        s_cfg.wifi_on ? "true" : "false", s_cfg.remote_fire ? "true" : "false",
+        s_cfg.wifi_ssid[0] ? s_cfg.wifi_ssid : "", s_sd_ok ? "true" : "false");
+    unlock();
+}
+
+bool bridge_set_setting(const char *key, const char *value)
+{
+    if (!key || !*key || !value) return false;
+    /* Unknown key is the only real failure. Setting something to the value it
+     * already holds is a perfectly ordinary request. */
+    if (!config_key_known(key)) return false;
+    /* Feed it through the SAME parser the config file uses, so a setting
+     * changed in the console behaves identically to one written on the card -
+     * and there is only one place where a key name is understood. */
+    char line[160];
+    int n = snprintf(line, sizeof(line), "%s=%s\n", key, value);
+    if (n <= 0 || n >= (int)sizeof(line)) return false;
+
+    lock();
+    dolos_config_t before = s_cfg;
+    config_parse(line, &s_cfg);
+    bool changed = (memcmp(&before, &s_cfg, sizeof(s_cfg)) != 0);
+    if (changed) {
+        s_cfg_dirty = true;
+        config_apply_live();
+        g_remote_fire_enabled = s_cfg.remote_fire;
+    }
+    unlock();
+    if (changed) {
+        /* Never echo a secret's VALUE: this log is teed to the SD card, which
+         * is readable on any laptop. The key name is useful, the value is not
+         * worth the exposure. */
+        bool secret = (strstr(key, "pass") != NULL) || (strstr(key, "pin") != NULL);
+        ESP_LOGI(TAG, "console set %s=%s", key, secret ? "***" : value);
+    }
+    return true;                 /* the key was understood; that is the contract */
+}
+
+bool bridge_save_settings(void)
+{
+    lock();
+    bool ok = config_save();
+    if (ok) s_cfg_dirty = false;
+    unlock();
+    return ok;
+}
+
 bool bridge_set_config(const char *text)
 {
     if (!s_sd_ok) return false;
@@ -320,7 +460,12 @@ int bridge_read_audit(char *buf, size_t cap)
 }
 bool bridge_remote_select(const char *name)
 {
-    lock(); bool ok = false;
+    lock();
+    /* payload_task is reading the very buffer load_selected() would rewrite.
+     * Changing the script halfway through an injection would type a spliced
+     * mixture of two payloads. */
+    if (!mode_is_idle(s_mode)) { unlock(); return false; }
+    bool ok = false;
     for (int i = 0; i < s_npayloads; i++) if (strcmp(s_names[i], name) == 0) { s_sel = i; load_selected(); ok = true; break; }
     unlock(); return ok;
 }
@@ -330,12 +475,35 @@ void bridge_set_remote_fire_enabled(bool on)
     g_remote_fire_enabled = on;
     ESP_LOGW(TAG, "remote fire %s (via console)", on ? "ENABLED" : "disabled");
 }
-bool bridge_remote_arm(void)
+arm_result_t bridge_remote_arm(void)
 {
-    if (!g_remote_fire_enabled) return false;
-    lock(); bool ok = (s_mode == DUI_SAFE && s_lint_problems == 0); if (ok) g_remote_req = 1; unlock();
-    return ok;
+    if (!g_remote_fire_enabled) return ARM_ERR_REMOTE_OFF;
+    if (s_flash_mode)           return ARM_ERR_FLASH_MODE;  /* HID never started */
+    lock();
+    arm_result_t rc;
+    /* DUI_DONE is the idle screen shown after a run; it returns to SAFE by
+     * itself a few seconds later. Refusing to arm from it meant the console
+     * said "refused" for several seconds after every single run, with no
+     * explanation - so it counts as idle here. */
+    if (s_lint_problems > 0)                            rc = ARM_ERR_LINT;
+    else if (!mode_is_idle(s_mode))                     rc = ARM_ERR_BUSY;
+    else { g_remote_req = 1; rc = ARM_OK; }
+    unlock();
+    return rc;
 }
+void bridge_note_console_login(void)
+{
+    if (g_console_used) return;
+    g_console_used = true;
+    nvs_handle_t h;
+    if (nvs_open("dolos", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "consoleused", 1);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "console login seen - admin password no longer shown on screen");
+}
+
 void bridge_remote_abort(void) { lock(); g_remote_req = 2; unlock(); }
 
 static void boot_guard_ok(void);   /* defined with the guard, below */
@@ -358,9 +526,13 @@ static void ui_task(void *arg)
          * unchanged; remote fire only proceeds while remote_fire is enabled). */
         int rq = 0;
         if (s_lock && xSemaphoreTake(s_lock, 0) == pdTRUE) { rq = g_remote_req; g_remote_req = 0; xSemaphoreGive(s_lock); }
-        if (rq == 2) { if (s_mode == DUI_RUNNING) s_abort = true;
-                       else if (s_mode != DUI_SAFE && s_mode != DUI_DONE) s_mode = DUI_SAFE; }
-        else if (rq == 1 && s_mode == DUI_SAFE && g_remote_fire_enabled && s_lint_problems == 0) { s_mode = DUI_COUNTDOWN; stage_ms = t; }
+        if (rq == 2) {                      /* remote abort */
+            if (s_mode == DUI_RUNNING)      s_abort = true;
+            else if (!mode_is_idle(s_mode)) s_mode = DUI_SAFE;   /* same test as arming */
+        }
+        else if (rq == 1 && mode_is_idle(s_mode) && g_remote_fire_enabled && s_lint_problems == 0) {
+            s_mode = DUI_COUNTDOWN; stage_ms = t;   /* same idle test as the bridge */
+        }
 
         switch (s_mode) {
         case DUI_MENU: {
@@ -371,8 +543,25 @@ static void ui_task(void *arg)
                 if (a == MENU_ACT_SAVE)      { config_save(); s_cfg_dirty = false; }
                 else if (a == MENU_ACT_EXIT) { s_mode = DUI_SAFE; stage_ms = t; }
                 else if (a == MENU_ACT_CONSOLE_INFO) { s_mode = DUI_INFO; stage_ms = t; }
-                else if (a == MENU_ACT_FACTORY) { dolos_factory_reset(); }
+                else if (a == MENU_ACT_FACTORY) {
+                    if (cv) {
+                        dui_render_notice(cv, "FACTORY RESET",
+                                          "ERASING SETTINGS AND", "CREDENTIALS - RESTARTING");
+                        display_flush();
+                        vTaskDelay(pdMS_TO_TICKS(1800));
+                    }
+                    dolos_factory_reset();
+                }
                 else if (a == MENU_ACT_NEW_CREDS) {
+                    /* This restarts the device and changes the Wi-Fi key, so
+                     * anyone connected is dropped. Say so on screen first -
+                     * an unannounced reboot looks exactly like a crash. */
+                    if (cv) {
+                        dui_render_notice(cv, "NEW CREDENTIALS",
+                                          "RESTARTING - REJOIN WITH", "THE NEW KEY ON SCREEN");
+                        display_flush();
+                        vTaskDelay(pdMS_TO_TICKS(1800));
+                    }
                     /* Throw the stored secrets away and restart: the AP key is
                      * baked into the running radio, so the only honest way to
                      * apply a new one is to come up again with it. The new
@@ -381,20 +570,24 @@ static void ui_task(void *arg)
                     if (nvs_open("dolos", NVS_READWRITE, &nh) == ESP_OK) {
                         nvs_erase_key(nh, "wifi_pass");
                         nvs_erase_key(nh, "admin_pass");
+                        nvs_erase_key(nh, "consoleused");   /* show the new one */
                         nvs_commit(nh);
                         nvs_close(nh);
                     }
                     ESP_LOGW(TAG, "console credentials cleared - restarting to mint new ones");
                     esp_restart();
                 }
-                else                         { s_cfg_dirty = true; config_apply_live(); }
+                else { s_cfg_dirty = true; lock(); config_apply_live(); unlock(); }
             }
             break;
         }
         case DUI_INFO:
-            /* Any deliberate press goes back to the menu, so the credentials
-             * are not left on display indefinitely by accident. */
-            if (e != BTN_NONE) { s_mode = DUI_MENU; stage_ms = t; }
+            /* HOLD reveals a hidden password for as long as you stay on this
+             * screen; anything else leaves, and leaving always re-hides it.
+             * (This handler was lost in an edit, which is why HOLD=SHOW did
+             * nothing: the flag was read by the UI but never set.) */
+            if (e == BTN_HOLD)      { s_info_reveal = !s_info_reveal; }
+            else if (e != BTN_NONE) { s_mode = DUI_MENU; s_info_reveal = false; stage_ms = t; }
             break;
         case DUI_SAFE:
             /* ui_lock is a level: MENU hides the settings screen, FULL also
@@ -435,8 +628,17 @@ static void ui_task(void *arg)
             if (e == BTN_TAP) { s_mode = DUI_SAFE; break; }
             if (t - stage_ms >= COUNTDOWN_MS) {
                 s_abort = false; s_run_done = false; s_cur_line = 0; s_run_count++;
-                s_mode = DUI_RUNNING; stage_ms = t;
-                xTaskCreate(payload_task, "payload", 4096, NULL, 6, NULL);
+                /* If the task cannot be created the payload never runs, and the
+                 * old code still moved to RUNNING - where it waited on a
+                 * completion flag nothing would ever set. The device sat on
+                 * "RUNNING" until it was power-cycled. Only enter RUNNING once
+                 * the task actually exists. */
+                if (xTaskCreate(payload_task, "payload", 6144, NULL, 6, NULL) == pdPASS) {
+                    s_mode = DUI_RUNNING; stage_ms = t;
+                } else {
+                    ESP_LOGE(TAG, "could not start the payload task - out of memory");
+                    s_mode = DUI_SAFE; stage_ms = t;
+                }
             }
             break;
         case DUI_RUNNING:
@@ -473,6 +675,12 @@ static void ui_task(void *arg)
         st.cfg = &s_cfg;
         st.ui_lock = s_cfg.ui_lock;
         st.safe_boot = g_safe_boot;
+        st.degraded = (g_crashes > 0);
+        st.console_up = g_console_up;
+        /* Hide the console password once it has been used. This assignment was
+         * missing, so the flag was permanently false and the password stayed on
+         * screen no matter how many times someone logged in. */
+        st.admin_pw_masked = g_console_used && !s_info_reveal;
         st.wifi_key = g_wifi_up ? s_cfg.wifi_pass : NULL;
         st.admin_user = s_cfg.admin_user[0] ? s_cfg.admin_user : "admin";
         st.lint_problems = s_lint_problems;
@@ -510,7 +718,13 @@ static void boot_guard_begin(void)
         nvs_commit(h);
         nvs_close(h);
     }
+    g_crashes = count;
     g_safe_boot = (count >= 2);
+    uint8_t used = 0;
+    if (nvs_open("dolos", NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_u8(h, "consoleused", &used) == ESP_OK) g_console_used = (used != 0);
+        nvs_close(h);
+    }
     ESP_LOGW(TAG, "reset reason=%d crashed=%d consecutive=%u -> %s",
              (int)r, (int)crashed, count, g_safe_boot ? "SAFE BOOT" : "normal boot");
 }
@@ -550,6 +764,12 @@ void dolos_factory_reset(void)
  * 1.14" screen and typed into a phone. */
 static void gen_secret(char *out, size_t len)
 {
+    /* 32 characters: digits and capitals minus 0/O and 1/I, the pairs no font
+     * can separate. Legibility of the REST is the font's job, not the
+     * alphabet's - shrinking the character set to work around a hard-to-read
+     * typeface would cost real entropy per character for a cosmetic reason.
+     * 32^16 is about 80 bits for the Wi-Fi key and 32^14 about 70 for the
+     * console password. */
     static const char AB[] = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
     for (size_t i = 0; i < len; i++) out[i] = AB[esp_random() % (sizeof(AB) - 1)];
     out[len] = 0;
@@ -564,41 +784,44 @@ static void gen_secret(char *out, size_t len)
  * wins, so an operator can still pin their own. */
 static void ensure_credentials(void)
 {
-    /* Entropy first.
+    /* NOTE ON ENTROPY.
      *
      * esp_random() is only a TRUE random number generator while the RF
-     * subsystem (Wi-Fi or Bluetooth) is running - Espressif is explicit that
-     * without it the hardware RNG output is not truly random. Credentials are
-     * minted here, BEFORE the radio starts, which is precisely the weak window.
-     * bootloader_random_enable() switches on the SAR-ADC entropy source for the
-     * few microseconds this needs, and it is switched off again immediately -
-     * it must not still be running when Wi-Fi or the ADC driver start. */
-    bootloader_random_enable();
-
+     * subsystem is running, and credentials are minted here, before the radio
+     * starts. The documented remedy - bootloader_random_enable() around the
+     * generation - was tried and REVERTED: it reconfigures SAR-ADC/RTC state
+     * immediately before esp_wifi_init(), and the radio then failed to start,
+     * which the boot-loop guard turned into a device that came up without its
+     * console. A working device beats a marginally better key.
+     *
+     * The proper fix is to mint credentials once the RF subsystem is already
+     * up, rather than borrowing a different entropy source before it. That is
+     * tracked as follow-up work; until then this is a known limitation. */
     nvs_handle_t h;
-    if (nvs_open("dolos", NVS_READWRITE, &h) != ESP_OK) { bootloader_random_disable(); return; }
+    if (nvs_open("dolos", NVS_READWRITE, &h) != ESP_OK) return;
     bool dirty = false;
     size_t len;
 
     if (!s_cfg.wifi_pass[0]) {
         len = sizeof(s_cfg.wifi_pass);
         if (nvs_get_str(h, "wifi_pass", s_cfg.wifi_pass, &len) != ESP_OK) {
-            gen_secret(s_cfg.wifi_pass, 10);            /* >= 8 for WPA2 */
-            nvs_set_str(h, "wifi_pass", s_cfg.wifi_pass);
+            gen_secret(s_cfg.wifi_pass, 16);   /* 32^16 ~= 80 bits */
+            if (nvs_set_str(h, "wifi_pass", s_cfg.wifi_pass) != ESP_OK)
+                ESP_LOGE(TAG, "could not store the Wi-Fi key - it will change on reboot");
             dirty = true;
         }
     }
     if (!s_cfg.admin_pass[0]) {
         len = sizeof(s_cfg.admin_pass);
         if (nvs_get_str(h, "admin_pass", s_cfg.admin_pass, &len) != ESP_OK) {
-            gen_secret(s_cfg.admin_pass, 8);
-            nvs_set_str(h, "admin_pass", s_cfg.admin_pass);
+            gen_secret(s_cfg.admin_pass, 14);  /* 32^14 ~= 70 bits, behind lockout */
+            if (nvs_set_str(h, "admin_pass", s_cfg.admin_pass) != ESP_OK)
+                ESP_LOGE(TAG, "could not store the admin password - it will change on reboot");
             dirty = true;
         }
     }
     if (dirty) nvs_commit(h);
     nvs_close(h);
-    bootloader_random_disable();          /* before Wi-Fi/ADC touch the SAR */
 }
 
 void app_main(void)
@@ -629,23 +852,43 @@ void app_main(void)
         }
         scan_payloads();
     }
+    bootlog_open();
     load_selected();
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
 
     if (s_flash_mode) ESP_LOGW(TAG, "FLASH MODE (BOOT held) - USB-HID NOT started");
     else              usb_hid_init(s_cfg.usb_vid, s_cfg.usb_pid, s_cfg.usb_mfr, s_cfg.usb_product);
 
-    /* Wireless console (v0.3): WPA2 SoftAP + secure HTTP console. Never in FLASH
-     * MODE. Physical arming is unchanged; remote fire stays admin-gated + visible. */
+    /* Wireless console: WPA2 SoftAP + secure HTTP console.
+     *
+     * It runs in FLASH MODE too. FLASH MODE means USB-HID never started, so the
+     * device physically cannot type - a console on it can manage settings and
+     * payloads but cannot fire anything, which is strictly safe. It also keeps
+     * the USB serial port alive while the radio is up, which is the only way to
+     * see a fault in the Wi-Fi path at all (in normal operation TinyUSB owns
+     * the USB pins and panics print to a port that no longer exists). */
     s_lock = xSemaphoreCreateMutex();
     g_remote_fire_enabled = s_cfg.remote_fire;
     ensure_credentials();
-    if (!s_flash_mode && s_cfg.wifi_on && !g_safe_boot) {
-        if (net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass) &&
-            console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {
+    /* Degrade in stages rather than all at once.
+     *
+     * A crash used to cost the whole radio, which threw away the console as
+     * well and told us nothing about which of the two was at fault. Now the
+     * first crash drops only the HTTP console and keeps the access point, and
+     * only a second one drops the radio entirely. The screen names the stage,
+     * so a single power cycle says where the fault is. */
+    if (s_cfg.wifi_on && g_crashes < 2) {
+        if (net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass)) {
             g_wifi_up = true;
-            if (!s_cfg.admin_pass[0])
-                strncpy(g_admin_pw_show, console_admin_password(), sizeof(g_admin_pw_show) - 1);
+            if (g_crashes == 0) {
+                if (console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {
+                    g_console_up = true;
+                    if (!s_cfg.admin_pass[0])
+                        strncpy(g_admin_pw_show, console_admin_password(), sizeof(g_admin_pw_show) - 1);
+                }
+            } else {
+                ESP_LOGW(TAG, "previous boot crashed - access point only, no HTTP console");
+            }
         }
     }
 
@@ -653,5 +896,14 @@ void app_main(void)
              s_flash_mode ? "FLASH" : "HID", s_npayloads, layout_name(s_cfg.layout),
              speed_name(s_cfg.speed), s_cfg.dry_run, s_cfg.arm_pin[0] ? "set" : "off");
 
-    xTaskCreate(ui_task, "dolos_ui", 8192, NULL, 5, NULL);
+    /* Without the UI task there is no screen and no button: the device would
+     * sit on the splash looking bricked, with nothing anywhere saying why. It
+     * is the last thing started, so if memory is this tight the honest thing is
+     * to say so loudly rather than pretend the device came up. */
+    if (xTaskCreate(ui_task, "dolos_ui", 8192, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "FATAL: could not start the UI task - out of memory. "
+                      "The screen and button will not respond.");
+    }
+    vTaskDelay(pdMS_TO_TICKS(3000));   /* capture anything the UI logs early */
+    bootlog_close();
 }

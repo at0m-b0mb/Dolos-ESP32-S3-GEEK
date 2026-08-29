@@ -1,4 +1,5 @@
 #include "dui.h"
+#include "dconfig.h"
 #include "bmp.h"
 #include <string.h>
 #include <stdio.h>
@@ -22,5 +23,16 @@ int main(int argc, char **argv)
     st.mode = DUI_COUNTDOWN; st.countdown=2; save(dir, "dui_countdown.bmp", &st, 0);
     st.mode = DUI_RUNNING; st.cur_line = 8;  save(dir, "dui_running.bmp", &st, 0);
     st.mode = DUI_DONE;                      save(dir, "dui_done.bmp", &st, 0);
+
+    /* settings menu */
+    dolos_config_t mcfg; config_defaults(&mcfg); mcfg.wifi_on = true;
+    st.mode = DUI_MENU; st.menu_sel = 2; st.cfg = &mcfg;
+    save(dir, "dui_menu.bmp", &st, 0);
+
+    /* console info: QR + credentials */
+    st.mode = DUI_INFO; st.wifi_on = true; st.console_up = true;
+    st.wifi_ssid = "Dolos-7C21"; st.wifi_key = "CG6892MXQ3JHTN4P";
+    st.admin_user = "admin"; st.admin_pw = "5NFVH6RQ2WKMDX";
+    save(dir, "dui_console.bmp", &st, 0);
     return 0;
 }

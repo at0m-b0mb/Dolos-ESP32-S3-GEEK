@@ -45,6 +45,13 @@ static const char *mode_word(dui_mode_t m)
     }
 }
 
+/* Centred text in the large face. */
+static void big_center(canvas_t *cv, int cx, int y, const char *s,
+                       uint16_t colour, int scale)
+{
+    cv_text_big(cv, cx - cv_text_big_width(s, scale) / 2, y, s, colour, -1, scale);
+}
+
 static void draw_kbd(canvas_t *cv, int x, int y, uint16_t c)
 {
     cv_rect(cv, x, y, 18, 11, c);
@@ -58,8 +65,12 @@ static void draw_header(canvas_t *cv, const dui_state_t *st)
 {
     cv_fill_rect(cv, 0, 0, W, 15, DU_PANEL);
     draw_kbd(cv, 4, 2, DU_ACCENT);
-    cv_text(cv, 27, 1, "DOLOS", DU_INK, -1, 2);
-    if (st->wifi_on) cv_fill_circle(cv, 80, 7, 3, DU_SAFE);   /* wireless console live */
+    cv_text_big(cv, 26, 2, "DOLOS", DU_INK, -1, 1);
+    /* Radio state, always visible: a payload error used to overwrite the only
+     * place this was shown, which hid exactly the thing we needed to see. */
+    if (st->wifi_on && st->console_up)  cv_fill_circle(cv, 80, 7, 3, DU_SAFE);
+    else if (st->wifi_on)               cv_fill_circle(cv, 80, 7, 3, DU_ARMED);
+    else                                cv_circle(cv, 80, 7, 3, DU_DIM);
     /* One badge slot, most important state wins: a live remote-fire beats a
      * dry run, and either beats telling you the buttons are locked. */
     if (st->remote_fire_enabled)      { cv_fill_rect(cv, 90, 3, 24, 10, DU_FIRE);  cv_text(cv, 93, 4, "RF",   DU_BG, -1, 1); }
@@ -117,7 +128,7 @@ static void draw_menu(canvas_t *cv, const dui_state_t *st)
     /* The list outgrew the panel once it passed eight entries, so it scrolls:
      * a fixed window of rows follows the selection, with arrows showing that
      * there is more above or below. The highlighted row is still the cursor. */
-    const int y0 = 19, rh = 12;
+    const int y0 = 18, rh = 15;
     const int visible = (H - 12 - y0) / rh;          /* rows that fit above the footer */
     int first = st->menu_sel - visible / 2;
     if (first > MENU__COUNT - visible) first = MENU__COUNT - visible;
@@ -127,14 +138,14 @@ static void draw_menu(canvas_t *cv, const dui_state_t *st)
         int item = first + row;
         int y = y0 + row * rh;
         bool sel = (item == st->menu_sel);
-        if (sel) cv_fill_rect(cv, 2, y - 1, W - 4, rh - 1, DU_ACCENT);
+        if (sel) cv_fill_rect(cv, 2, y - 2, W - 4, rh - 1, DU_ACCENT);
         uint16_t fg = sel ? DU_BG : DU_INK;
-        cv_text(cv, 6, y, menu_label((menu_item_t)item), fg, -1, 1);
+        cv_text_big(cv, 6, y, menu_label((menu_item_t)item), fg, -1, 1);
         if (st->cfg) {
             char v[24];
             menu_value(st->cfg, (menu_item_t)item, v, sizeof(v));
-            if (v[0]) cv_text(cv, W - cv_text_width(v, 1) - 12, y, v,
-                              sel ? DU_BG : DU_SAFE, -1, 1);
+            if (v[0]) cv_text_big(cv, W - cv_text_big_width(v, 1) - 12, y, v,
+                                  sel ? DU_BG : DU_SAFE, -1, 1);
         }
     }
     /* more-above / more-below markers, in the right margin */
@@ -156,11 +167,15 @@ static void draw_fit_scale1(canvas_t *cv, int x, int y, const char *s,
 }
 
 /* Same, but preferring double size when the whole string fits at that size. */
+/* Credential values are drawn in the larger unambiguous face (font7x12), the
+ * one built so 5/S, 6/G, 8/B, 2/Z and 0/O cannot be mistaken for each other.
+ * Falls back to the small face only if a string is too wide even at 1x. */
 static void draw_fit(canvas_t *cv, int x, int y, const char *s,
                      uint16_t colour, int maxw)
 {
     const char *t = s ? s : "-";
-    if (cv_text_width(t, 2) <= maxw) { cv_text(cv, x, y, t, colour, -1, 2); return; }
+    if (cv_text_big_width(t, 1) <= maxw) { cv_text_big(cv, x, y, t, colour, -1, 1); return; }
+    if (cv_text_width(t, 2) <= maxw)     { cv_text(cv, x, y, t, colour, -1, 2); return; }
     draw_fit_scale1(cv, x, y, t, colour, maxw);
 }
 
@@ -214,11 +229,23 @@ static void draw_info(canvas_t *cv, const dui_state_t *st)
     cv_text(cv, tx, 47, "KEY", DU_DIM, -1, 1);
     draw_fit(cv, tx, 56, st->wifi_key ? st->wifi_key : "-", DU_INK, tw);
     {
-        char who[40];
-        snprintf(who, sizeof(who), "LOGIN  %s", st->admin_user ? st->admin_user : "admin");
+        /* The reveal hint rides on the LOGIN label rather than getting a row of
+         * its own: the row below is the console URL, and putting both there
+         * drew them on top of each other. */
+        char who[44];
+        snprintf(who, sizeof(who), "LOGIN  %s%s",
+                 st->admin_user ? st->admin_user : "admin",
+                 st->admin_pw_masked ? "   HOLD=SHOW" : "");
         draw_fit_scale1(cv, tx, 76, who, DU_DIM, tw);
     }
-    draw_fit(cv, tx, 85, st->admin_pw ? st->admin_pw : "-", DU_ARMED, tw);
+    if (st->admin_pw_masked) {
+        /* Someone has already logged in with this password, so it has served
+         * its purpose; leaving it on screen hands console control to whoever
+         * picks the device up. HOLD brings it back when it is needed. */
+        draw_fit(cv, tx, 85, "********", DU_DIM, tw);
+    } else {
+        draw_fit(cv, tx, 85, st->admin_pw ? st->admin_pw : "-", DU_ARMED, tw);
+    }
     draw_fit_scale1(cv, tx, 106, "http://192.168.4.1", DU_DIM, tw);
 }
 
@@ -238,7 +265,7 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
         return;
     }
     uint16_t mc = mode_color(st->mode);
-    cv_text_center(cv, W / 2, 24, mode_word(st->mode), mc, -1, 3);
+    big_center(cv, W / 2, 20, mode_word(st->mode), mc, 2);
 
     switch (st->mode) {
         case DUI_SAFE: {
@@ -248,38 +275,45 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
                          st->payload_name ? st->payload_name : "-");
             else
                 snprintf(pl, sizeof(pl), "%s", st->payload_name ? st->payload_name : "demo");
-            cv_text_center(cv, W / 2, 54, pl, DU_INK, -1, 1);
+            big_center(cv, W / 2, 48, pl, DU_INK, 1);
             if (st->lint_problems > 0) {
                 /* A payload that will not do what it says is a hazard on a live
                  * engagement, so the device refuses to arm and says why. */
                 char le[40];
                 snprintf(le, sizeof(le), "PAYLOAD ERROR  LINE %d", st->lint_line);
-                cv_text_center(cv, W / 2, 68, le, DU_FIRE, -1, 1);
-                if (st->lint_msg) cv_text_center(cv, W / 2, 80, st->lint_msg, DU_DIM, -1, 1);
-                cv_text_center(cv, W / 2, 96, "ARMING BLOCKED", DU_ARMED, -1, 1);
+                big_center(cv, W / 2, 62, le, DU_FIRE, 1);
+                if (st->lint_msg) {
+                    char m[42];
+                    snprintf(m, sizeof(m), "%s", st->lint_msg);   /* clip long text */
+                    cv_text_center(cv, W / 2, 82, m, DU_DIM, -1, 1);
+                }
+                big_center(cv, W / 2, 100, "ARMING BLOCKED", DU_ARMED, 1);
             } else {
                 /* The hint must describe what the button will ACTUALLY do at
                  * this lock level, or a locked device just looks broken. */
                 const char *hint =
                     (st->ui_lock >= UI_LOCK_FULL || st->payload_count <= 1)
                         ? "HOLD BOOT TO ARM" : "TAP = NEXT   HOLD = ARM";
-                cv_text_center(cv, W / 2, 70, hint, DU_DIM, -1, 1);
+                big_center(cv, W / 2, 64, hint, DU_DIM, 1);
                 if (st->wifi_on) {
                     /* Just the network name here; the key and the console login
                      * live on the CONSOLE screen, drawn large and with a QR. */
                     char l1[44];
                     snprintf(l1, sizeof(l1), "AP  %s", st->wifi_ssid ? st->wifi_ssid : "-");
-                    cv_text_center(cv, W / 2, 88, l1, DU_SAFE, -1, 1);
+                    big_center(cv, W / 2, 80, l1, DU_SAFE, 1);
                     if (st->ui_lock == UI_LOCK_OFF)
                         cv_text_center(cv, W / 2, 104, "SETTINGS > CONSOLE INFO",
                                        cv_rgb(90, 74, 86), -1, 1);
+                } else if (st->degraded && !st->safe_boot) {
+                    big_center(cv, W / 2, 82, "AP ONLY - NO CONSOLE", DU_ARMED, 1);
+                    big_center(cv, W / 2, 100, "LAST BOOT CRASHED", DU_DIM, 1);
                 } else if (st->safe_boot) {
                     /* Tell the operator the device chose to come up reduced,
                      * rather than leaving them to wonder where the radio went. */
-                    cv_text_center(cv, W / 2, 88, "SAFE BOOT - RADIO OFF", DU_ARMED, -1, 1);
-                    cv_text_center(cv, W / 2, 100, "LAST BOOT CRASHED", DU_DIM, -1, 1);
+                    big_center(cv, W / 2, 82, "SAFE BOOT - RADIO OFF", DU_ARMED, 1);
+                    big_center(cv, W / 2, 100, "LAST BOOT CRASHED", DU_DIM, 1);
                 } else {
-                    cv_text_center(cv, W / 2, 90, "DEVICE WILL NOT TYPE", cv_rgb(90,74,86), -1, 1);
+                    big_center(cv, W / 2, 84, "DEVICE WILL NOT TYPE", cv_rgb(110, 92, 106), 1);
                     cv_text_center(cv, W / 2, 108,
                         st->ui_lock == UI_LOCK_OFF ? "DOUBLE-TAP = SETTINGS" : "SETTINGS LOCKED",
                         cv_rgb(90,74,86), -1, 1);
@@ -302,13 +336,13 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
             break;
         }
         case DUI_ARMED:
-            cv_text_center(cv, W / 2, 56, "HOLD BOOT TO FIRE", DU_INK, -1, 1);
-            cv_text_center(cv, W / 2, 74, "TAP TO CANCEL", DU_DIM, -1, 1);
+            big_center(cv, W / 2, 52, "HOLD BOOT TO FIRE", DU_INK, 1);
+            big_center(cv, W / 2, 72, "TAP TO CANCEL", DU_DIM, 1);
             break;
         case DUI_COUNTDOWN: {
             char n[4]; snprintf(n, sizeof(n), "%d", st->countdown);
-            cv_text_center(cv, W / 2, 50, n, DU_FIRE, -1, 5);
-            cv_text_center(cv, W / 2, 100, "TAP TO ABORT", DU_DIM, -1, 1);
+            big_center(cv, W / 2, 44, n, DU_FIRE, 4);
+            big_center(cv, W / 2, 100, "TAP TO ABORT", DU_DIM, 1);
             break;
         }
         case DUI_RUNNING:
@@ -316,15 +350,15 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
             {
                 char b[32]; snprintf(b, sizeof(b), "%sLINE %d / %d",
                                      st->dry_run ? "DRY  " : "", st->cur_line, st->total_lines);
-                cv_text_center(cv, W / 2, 76, b, DU_INK, -1, 1);
+                big_center(cv, W / 2, 74, b, DU_INK, 1);
             }
-            cv_text_center(cv, W / 2, 92, "TAP TO ABORT", DU_DIM, -1, 1);
+            big_center(cv, W / 2, 92, "TAP TO ABORT", DU_DIM, 1);
             break;
         case DUI_MENU:
         case DUI_INFO: break;   /* drawn above; listed so -Wswitch stays happy */
         case DUI_DONE:
-            cv_text_center(cv, W / 2, 60, st->dry_run ? "DRY-RUN COMPLETE" : "PAYLOAD SENT", DU_INK, -1, 1);
-            cv_text_center(cv, W / 2, 78, "TAP TO RETURN TO SAFE", DU_DIM, -1, 1);
+            big_center(cv, W / 2, 54, st->dry_run ? "DRY-RUN COMPLETE" : "PAYLOAD SENT", DU_INK, 1);
+            big_center(cv, W / 2, 76, "TAP TO RETURN TO SAFE", DU_DIM, 1);
             break;
     }
     if (st->remote_fire_enabled) draw_rf_banner(cv);
@@ -332,11 +366,21 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
     draw_footer(cv, st);
 }
 
+void dui_render_notice(canvas_t *cv, const char *title,
+                       const char *line1, const char *line2)
+{
+    cv_clear(cv, DU_BG);
+    big_center(cv, W / 2, 26, title ? title : "", DU_ARMED, 2);
+    if (line1) big_center(cv, W / 2, 62, line1, DU_INK, 1);
+    if (line2) big_center(cv, W / 2, 80, line2, DU_INK, 1);
+    cv_text_center(cv, W / 2, H - 22, WARN_TAG, DU_ACCENT, -1, 1);
+}
+
 void dui_render_splash(canvas_t *cv)
 {
     cv_clear(cv, DU_BG);
     draw_kbd(cv, W / 2 - 46, 44, DU_ACCENT);
-    cv_text(cv, W / 2 - 22, 40, "DOLOS", DU_INK, -1, 3);
-    cv_text_center(cv, W / 2, 74, "USB-HID PAYLOAD RUNNER", DU_DIM, -1, 1);
-    cv_text_center(cv, W / 2, 92, WARN_TAG, DU_ACCENT, -1, 1);
+    big_center(cv, W / 2 + 12, 38, "DOLOS", DU_INK, 3);
+    big_center(cv, W / 2, 76, "USB-HID PAYLOAD RUNNER", DU_DIM, 1);
+    big_center(cv, W / 2, 96, WARN_TAG, DU_ACCENT, 1);
 }

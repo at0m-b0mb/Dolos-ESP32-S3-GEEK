@@ -1,0 +1,18 @@
+REM ============================================================
+REM  Dolos speed / drop test
+REM
+REM  Types the same 40-character ruler ten times. Count them: if
+REM  any line is short, the current speed setting is too fast for
+REM  this host. Try a slower profile in Settings and run it again.
+REM
+REM  Text only. Nothing executes.
+REM ============================================================
+DEFAULTDELAY 15
+DELAY 1500
+
+STRING === SPEED TEST: ten identical 40-char lines ===
+ENTER
+STRINGLN 0123456789012345678901234567890123456789
+REPEAT 9
+STRING === SPEED TEST END - every line above must be 40 chars ===
+ENTER

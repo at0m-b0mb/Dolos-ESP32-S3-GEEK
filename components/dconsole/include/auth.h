@@ -60,12 +60,29 @@ void   auth_init(auth_store_t *s, auth_hash_fn hash, auth_rng_fn rng, uint32_t i
 bool   auth_set_user(auth_store_t *s, const char *user, const char *password, role_t role);
 role_t auth_verify(auth_store_t *s, const char *user, const char *password);
 
+/* Enumerate accounts. Returns false once i is past the last used slot. */
+bool   auth_user_at(const auth_store_t *s, int i, const char **name, role_t *role);
+int    auth_user_count(const auth_store_t *s);
+
+/* Remove an account. Refuses to delete the last remaining admin - a console
+ * with no administrator cannot be administered again without a factory reset. */
+bool   auth_delete_user(auth_store_t *s, const char *user);
+
 bool   auth_locked(const auth_store_t *s, uint32_t now_ms);
 void   auth_note_fail(auth_store_t *s, uint32_t now_ms);
 void   auth_note_success(auth_store_t *s);
 
 auth_session_t *auth_session_create(auth_store_t *s, role_t role, uint32_t now_ms, uint32_t ttl_ms);
 auth_session_t *auth_session_lookup(auth_store_t *s, const char *token, uint32_t now_ms);
+/* Milliseconds until this session expires; 0 once it has. */
+uint32_t auth_session_remaining_ms(const auth_session_t *sess, uint32_t now_ms);
+
+/* Push the expiry out to now + ttl_ms. Deliberately NOT called on ordinary
+ * requests: a console left open would then poll its own session alive forever,
+ * which is exactly what an idle timeout exists to prevent. It is only invoked
+ * when a person asks to stay signed in. */
+void   auth_session_extend(auth_session_t *sess, uint32_t now_ms, uint32_t ttl_ms);
+
 bool   auth_csrf_ok(const auth_session_t *sess, const char *csrf);
 void   auth_session_destroy(auth_store_t *s, const char *token);
 

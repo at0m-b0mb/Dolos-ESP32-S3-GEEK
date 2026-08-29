@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "font5x8.h"
+#include "font7x12.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,6 +57,11 @@ void cv_fill_circle(canvas_t *cv, int cx, int cy, int r, uint16_t color);
 int  cv_char(canvas_t *cv, int x, int y, char c, uint16_t fg, int32_t bg, int scale);
 int  cv_text(canvas_t *cv, int x, int y, const char *s, uint16_t fg, int32_t bg, int scale);
 int  cv_text_width(const char *s, int scale);
+
+/* The same, in the larger unambiguous credential face (font7x12). Used for
+ * strings a human has to read off the screen and type somewhere else. */
+int  cv_text_big(canvas_t *cv, int x, int y, const char *s, uint16_t fg, int32_t bg, int scale);
+int  cv_text_big_width(const char *s, int scale);
 void cv_text_center(canvas_t *cv, int cx, int y, const char *s, uint16_t fg, int32_t bg, int scale);
 
 #ifdef __cplusplus

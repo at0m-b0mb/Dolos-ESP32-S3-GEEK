@@ -72,4 +72,32 @@ TEST_MAIN_BEGIN
         CHECK(n == 6, "reports the true total (6), got %d", n);
         CHECK(two[0].line == 1, "first kept problem is the first one");
     }
+
+    SUITE("lint: CRLF payloads (written on Windows) are accepted");
+    {
+        /* This is a real payload off an SD card. Splitting on '\n' alone leaves
+         * a trailing '\r', which made "DELAY 3000" fail the numeric check and
+         * reported "DELAY needs a number of ms" on line 1 of a perfectly good
+         * file. Every line here ends CRLF. */
+        const char *crlf =
+            "DELAY 3000\r\n"
+            "GUI r\r\n"
+            "DELAY 800\r\n"
+            "STRING CMD\r\n"
+            "ENTER\r\n"
+            "REPEAT 2\r\n";
+        int n = ducky_lint(crlf, LAYOUT_US, OS_WINDOWS, e, 4);
+        CHECK(n == 0, "CRLF payload should be clean, got %d problem(s): %s",
+              n, n ? e[0].msg : "-");
+
+        /* and a genuinely bad CRLF line is still caught, on the right line */
+        const char *bad = "DELAY 3000\r\nDELAY abc\r\n";
+        n = ducky_lint(bad, LAYOUT_US, OS_WINDOWS, e, 4);
+        CHECK(n == 1 && e[0].line == 2, "bad CRLF line still flagged on line 2 (got %d, line %d)",
+              n, n ? e[0].line : -1);
+
+        /* lone-CR (classic Mac) endings must not merge the whole file into one line */
+        CHECK(ducky_lint("DELAY 100\r\nSTRING hi\r\n", LAYOUT_US, OS_WINDOWS, e, 4) == 0,
+              "mixed CRLF file is clean");
+    }
 TEST_MAIN_END

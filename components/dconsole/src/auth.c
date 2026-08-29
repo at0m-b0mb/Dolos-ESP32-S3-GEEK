@@ -77,6 +77,37 @@ role_t auth_verify(auth_store_t *s, const char *user, const char *password)
     return ROLE_NONE;
 }
 
+bool auth_user_at(const auth_store_t *s, int i, const char **name, role_t *role)
+{
+    if (i < 0 || i >= AUTH_MAX_USERS || !s->users[i].used) return false;
+    if (name) *name = s->users[i].user;
+    if (role) *role = s->users[i].role;
+    return true;
+}
+
+int auth_user_count(const auth_store_t *s)
+{
+    int n = 0;
+    for (int i = 0; i < AUTH_MAX_USERS; i++) if (s->users[i].used) n++;
+    return n;
+}
+
+bool auth_delete_user(auth_store_t *s, const char *user)
+{
+    int idx = -1, admins = 0;
+    for (int i = 0; i < AUTH_MAX_USERS; i++) {
+        if (!s->users[i].used) continue;
+        if (s->users[i].role == ROLE_ADMIN) admins++;
+        if (strncmp(s->users[i].user, user, sizeof(s->users[i].user)) == 0) idx = i;
+    }
+    if (idx < 0) return false;
+    /* Deleting the last admin would lock everyone out of their own device with
+     * no way back except a factory reset, so it is simply not allowed. */
+    if (s->users[idx].role == ROLE_ADMIN && admins <= 1) return false;
+    memset(&s->users[idx], 0, sizeof(s->users[idx]));
+    return true;
+}
+
 bool auth_locked(const auth_store_t *s, uint32_t now_ms)
 {
     return s->lock_until_ms != 0 && (int32_t)(now_ms - s->lock_until_ms) < 0;
@@ -116,6 +147,18 @@ auth_session_t *auth_session_lookup(auth_store_t *s, const char *token, uint32_t
         if (ct_memcmp(e->token, token, 32) == 0) return e;
     }
     return NULL;
+}
+
+uint32_t auth_session_remaining_ms(const auth_session_t *sess, uint32_t now_ms)
+{
+    if (!sess || !sess->used) return 0;
+    if ((int32_t)(now_ms - sess->expires_ms) >= 0) return 0;
+    return sess->expires_ms - now_ms;
+}
+
+void auth_session_extend(auth_session_t *sess, uint32_t now_ms, uint32_t ttl_ms)
+{
+    if (sess && sess->used) sess->expires_ms = now_ms + ttl_ms;
 }
 
 bool auth_csrf_ok(const auth_session_t *sess, const char *csrf)

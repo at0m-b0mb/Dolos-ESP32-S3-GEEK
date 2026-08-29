@@ -22,6 +22,27 @@ typedef enum {
     LAYOUT__COUNT
 } kb_layout_t;
 
+/* Is this Unicode codepoint a KEY ON THIS LAYOUT?
+ *
+ * On a German keyboard "a-umlaut" is one keystroke, not a Unicode escape
+ * sequence. Typing it through the operating system's Alt+numpad method instead
+ * costs seven USB reports, needs Num Lock on, needs EnableHexNumpad set in the
+ * registry, and produces nothing at all on a login screen. Looking the
+ * character up on the target layout first makes it a single keypress that works
+ * everywhere - the OS method stays as the fallback for characters the layout
+ * genuinely cannot produce.
+ *
+ * Layout data follows the tables in SpacehuhnTech/WiFiDuck (MIT). */
+bool layout_utf8_key(kb_layout_t layout, uint32_t cp, uint8_t *key, uint8_t *mods);
+
+/* A DEAD-KEY sequence: on many layouts an accented vowel is not a key at all,
+ * it is an accent key followed by the letter (acute then "a" gives a-acute).
+ * Returns the two keystrokes to send, in order. Spanish, Portuguese and German
+ * need this for their accented vowels, which is most of their written text. */
+bool layout_utf8_combo(kb_layout_t layout, uint32_t cp,
+                       uint8_t *dead_key, uint8_t *dead_mods,
+                       uint8_t *base_key, uint8_t *base_mods);
+
 kb_layout_t layout_from_name(const char *name);   /* us,uk,de,fr,es,it,pt,se,ch,latam */
 const char *layout_name(kb_layout_t l);
 

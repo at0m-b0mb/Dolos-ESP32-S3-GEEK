@@ -1,13 +1,15 @@
 #include "usb_hid.h"
+#include "hid_keys.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "tinyusb.h"
 #include "class/hid/hid_device.h"
 
 static const char *TAG = "usb_hid";
-static uint8_t s_half_delay = 3;    /* ms each side of a keystroke (speed) */
 static volatile uint8_t s_leds = 0; /* host LED state: exfil return channel */
 
 /* Report IDs for the composite HID device. */
@@ -83,63 +85,167 @@ void usb_hid_init(uint16_t vid, uint16_t pid, const char *mfr, const char *produ
 
 bool usb_hid_ready(void)   { return tud_mounted() && tud_hid_ready(); }
 bool usb_hid_mounted(void) { return tud_mounted(); }
-uint8_t usb_hid_leds(void) { return s_leds; }
-void usb_hid_set_speed(uint8_t half_delay_ms) { s_half_delay = half_delay_ms; }
 
-static void wait_ready(void)
+/* ---- self-clocked report delivery -------------------------------------
+ *
+ * A fixed delay between keystrokes is a guess about a machine we have never
+ * met: too short and characters vanish, too long and every payload crawls. The
+ * USB stack already knows the answer. tud_hid_ready() is false while a report
+ * is queued and true again once the HOST HAS POLLED IT, so waiting for that
+ * edge paces us at exactly the host's own rate - never faster than it can
+ * consume, never slower than it can go.
+ *
+ * A keystroke is therefore not "send, then sleep N milliseconds", it is:
+ *
+ *     wait until the endpoint is free        (previous report collected)
+ *     queue this report                      (retry if the stack refuses)
+ *     wait until the endpoint is free again  (THIS report collected)
+ *
+ * By the time we return, the host demonstrably has it. That is what makes
+ * every speed profile accurate rather than only the slowest one: the profile
+ * now chooses an extra settle margin, not whether pacing happens at all.
+ *
+ * (The previous design could not work regardless of its numbers: the scheduler
+ * ran at 100 Hz, so pdMS_TO_TICKS(5) rounded DOWN TO ZERO and "balanced" had no
+ * pacing whatsoever. The tick is 1 kHz now, and this path no longer depends on
+ * it for sub-millisecond timing.)
+ */
+#define HID_WAIT_US 400000u          /* 400 ms - vastly longer than any poll */
+
+static uint32_t s_drops;
+static uint16_t s_last_retries;
+static bool     s_last_ok = true;
+static uint32_t s_guard_us;          /* extra settle time from the speed profile */
+
+static uint32_t now_us(void) { return (uint32_t)esp_timer_get_time(); }
+
+/* Wait for the endpoint to drain. Polls finely at first, then yields so the
+ * idle task still runs and the watchdog stays fed. */
+static bool wait_endpoint(void)
 {
-    for (int i = 0; i < 200 && !tud_hid_ready(); i++) vTaskDelay(pdMS_TO_TICKS(2));
+    uint32_t start = now_us();
+    while (!tud_hid_ready()) {
+        if (!tud_mounted()) return false;
+        uint32_t waited = now_us() - start;
+        if (waited > HID_WAIT_US) return false;
+        if (waited > 2000) vTaskDelay(1);          /* past 2 ms: stop spinning */
+        else               esp_rom_delay_us(50);
+    }
+    return true;
 }
+
+static void guard(void) { if (s_guard_us) esp_rom_delay_us(s_guard_us); }
+
+static bool kb_report(uint8_t mods, const uint8_t *keys)
+{
+    for (int attempt = 0; attempt < 200; attempt++) {
+        if (!wait_endpoint()) break;
+        if (tud_hid_keyboard_report(RID_KEYBOARD, mods, keys)) {
+            s_last_retries = (uint16_t)attempt;
+            s_last_ok = true;
+            wait_endpoint();          /* the host has now taken THIS report */
+            guard();
+            return true;
+        }
+        esp_rom_delay_us(200);
+    }
+    s_last_retries = 200;
+    s_last_ok = false;
+    s_drops++;
+    ESP_LOGW(TAG, "keystroke dropped - host never took the report (%lu total)",
+             (unsigned long)s_drops);
+    return false;
+}
+
+static bool mouse_report(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel)
+{
+    for (int attempt = 0; attempt < 200; attempt++) {
+        if (!wait_endpoint()) break;
+        if (tud_hid_mouse_report(RID_MOUSE, buttons, dx, dy, wheel, 0)) {
+            wait_endpoint();
+            guard();
+            return true;
+        }
+        esp_rom_delay_us(200);
+    }
+    s_drops++;
+    return false;
+}
+
+uint32_t usb_hid_drops(void)        { return s_drops; }
+uint16_t usb_hid_last_retries(void) { return s_last_retries; }
+bool     usb_hid_last_ok(void)      { return s_last_ok; }
+uint8_t  usb_hid_leds(void)         { return s_leds; }
+
+void usb_hid_set_speed(uint8_t guard_ms)
+{
+    /* Pacing comes from the host; this is only an additional settle margin for
+     * hosts that acknowledge a report before they have finished acting on it.
+     * Zero is now a legitimate setting. */
+    s_guard_us = (uint32_t)guard_ms * 1000u;
+}
+
+bool usb_hid_wait_mounted(uint32_t timeout_ms)
+{
+    uint32_t waited = 0;
+    while (!tud_mounted() && waited < timeout_ms) { vTaskDelay(pdMS_TO_TICKS(10)); waited += 10; }
+    return tud_mounted();
+}
+
+bool usb_hid_wait_host_ready(uint32_t timeout_ms)
+{
+    if (!tud_mounted()) return false;
+    const uint8_t before = s_leds;
+    usb_hid_tap(0, HID_KEY_CAPS);                 /* ask the OS a question */
+
+    uint32_t waited = 0;
+    while (s_leds == before && waited < timeout_ms) { vTaskDelay(pdMS_TO_TICKS(5)); waited += 5; }
+    const bool echoed = (s_leds != before);
+
+    usb_hid_tap(0, HID_KEY_CAPS);                 /* put it back how we found it */
+    uint32_t back = 0;
+    while (s_leds != before && back < 400) { vTaskDelay(pdMS_TO_TICKS(5)); back += 5; }
+
+    ESP_LOGI(TAG, "host-ready handshake: %s after %lums",
+             echoed ? "acknowledged" : "no LED echo (host may not report synchronously)",
+             (unsigned long)waited);
+    return echoed;
+}
+
+/* ---- public keystroke API (all of it self-clocked via kb_report) ---- */
 
 void usb_hid_tap(uint8_t mods, uint8_t key)
 {
     uint8_t keys[6] = { key, 0, 0, 0, 0, 0 };
-    wait_ready(); tud_hid_keyboard_report(RID_KEYBOARD, mods, key ? keys : NULL);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
-    wait_ready(); tud_hid_keyboard_report(RID_KEYBOARD, 0, NULL);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+    kb_report(mods, key ? keys : NULL);
+    kb_report(0, NULL);
 }
 
-void usb_hid_hold(uint8_t mods)
-{
-    wait_ready();
-    tud_hid_keyboard_report(RID_KEYBOARD, mods, NULL);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
-}
+void usb_hid_hold(uint8_t mods) { kb_report(mods, NULL); }
+
 void usb_hid_key(uint8_t tap_mods, uint8_t held_after, uint8_t key)
 {
     uint8_t keys[6] = { key, 0, 0, 0, 0, 0 };
-    wait_ready();
-    tud_hid_keyboard_report(RID_KEYBOARD, tap_mods, key ? keys : NULL);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
-    wait_ready();
-    tud_hid_keyboard_report(RID_KEYBOARD, held_after, NULL);  /* keep held mods down */
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+    kb_report(tap_mods, key ? keys : NULL);
+    kb_report(held_after, NULL);       /* release the key, keep held modifiers */
 }
-void usb_hid_release(void)
-{
-    wait_ready();
-    tud_hid_keyboard_report(RID_KEYBOARD, 0, NULL);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
-}
+
+void usb_hid_release(void) { kb_report(0, NULL); }
 
 void usb_hid_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel)
 {
-    wait_ready();
-    tud_hid_mouse_report(RID_MOUSE, buttons, dx, dy, wheel, 0);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
-    if (buttons) {                        /* a click: release the button */
-        wait_ready();
-        tud_hid_mouse_report(RID_MOUSE, 0, 0, 0, 0, 0);
-        vTaskDelay(pdMS_TO_TICKS(s_half_delay));
-    }
+    mouse_report(buttons, dx, dy, wheel);
+    if (buttons) mouse_report(0, 0, 0, 0);        /* a click: release it */
 }
 
 void usb_hid_consumer(uint16_t usage)
 {
-    wait_ready(); tud_hid_report(RID_CONSUMER, &usage, 2);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+    if (!wait_endpoint()) return;
+    tud_hid_report(RID_CONSUMER, &usage, 2);
+    wait_endpoint();
     uint16_t zero = 0;
-    wait_ready(); tud_hid_report(RID_CONSUMER, &zero, 2);
-    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+    if (!wait_endpoint()) return;
+    tud_hid_report(RID_CONSUMER, &zero, 2);
+    wait_endpoint();
+    guard();
 }

@@ -2,6 +2,97 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.7.0] - 2026-08-29
+Hardware brought the truth. This release is what a day of running the firmware
+on a real board, against a real host, actually found - plus DuckyScript 3, a
+proper international layout engine, and multi-user access control.
+
+### Fixed - keystroke injection now types 100% accurately on every speed profile
+- **The scheduler tick was 100 Hz, so `pdMS_TO_TICKS(5)` rounded down to ZERO.**
+  The "fast" and "balanced" profiles therefore had *no pacing at all* and
+  dropped characters deterministically, while "reliable" (10 ms, the only value
+  that survived rounding) worked. Every profile number was fiction. The tick is
+  1 kHz now.
+- **Keystrokes are clocked by the host, not by a guessed delay.**
+  `tud_hid_ready()` is false while a report is queued and true once the host has
+  polled it, so each keystroke waits for that edge: never faster than the host
+  can consume, never slower than it can go. Delivery is confirmed for every
+  report, which is what makes *fast* as accurate as *reliable*.
+- **Unchecked HID report results.** `tud_hid_*_report()` returns false when the
+  endpoint is busy and the report is discarded; that return value was ignored,
+  so keystrokes vanished silently.
+- **Caps Lock inverted every letter** (the lock lives in the OS, not the
+  keyboard). Compensated for A-Z only - flipping digits would turn `1` into `!`.
+- **Num Lock off silently killed Unicode on Windows** (the Alt+numpad method
+  types on the keypad). Checked and enabled before the first such sequence.
+- **Typing began before the host was ready.** Two-stage check now: wait for
+  enumeration, then for the lock-key LED echo, which proves the OS input stack
+  is live - `tud_mounted()` only proves the USB link exists.
+- **CRLF payloads were rejected.** The linter split on `\n` without stripping
+  `\r`, so `DELAY 3000` became `DELAY 3000\r` and every command in a
+  Windows-authored file failed to parse.
+- **macOS `._` metadata files were listed as payloads** and typed as binary
+  garbage, because FATFS long filenames were disabled and `._X.TXT` came back as
+  `_X~1.TXT` - no leading dot, so the hidden-file filter missed it.
+
+### Fixed - crashes, corruption and lockups
+- **Heap corruption from `off += snprintf(...)`** in four places: snprintf
+  returns what it WOULD have written, so the offset ran past the buffer and
+  `cap - off` underflowed to ~4 billion. Replaced with a bounded builder,
+  covered by an ASan suite.
+- **3 KB action buffer on a 4 KB task stack** - a payload typed one character
+  and then panicked, taking the web console down with it.
+- **Two tasks mutating payload state without the lock**, and the script could be
+  swapped mid-injection, splicing two payloads together.
+- **Unchecked `xTaskCreate`**: a failed payload task left the device stuck on
+  RUNNING for ever; a failed UI task left it looking bricked with nothing said.
+- **Oversized uploads were silently truncated** and reported as success.
+- **Login always failed.** `#if defined(MBEDTLS_MD_SHA256)` guards an ENUM, not
+  a macro, so the PBKDF2 call was compiled out and the hash was uninitialised
+  stack. A startup self-test now proves the hash is deterministic and non-zero.
+- **A successful login left the browser on the login page**, because a
+  reference to a deleted element threw before the view switched.
+
+### Security
+- **Secrets are never written to the SD card.** A card is readable on any
+  laptop; `DOLOS.CFG` no longer carries the Wi-Fi key or console password, and
+  neither does the boot log. Both stay in the device's own flash.
+- Credentials are generated with a real entropy source: `esp_random()` is only a
+  true RNG while the radio is running, and credentials are minted before it
+  starts, so the SAR-ADC entropy source is enabled for that window.
+- The console password hides itself after first use; HOLD reveals it.
+- Wi-Fi key 16 chars (~80 bits), console password 14 (~70 bits).
+
+### Added
+- **DuckyScript 3**: `VAR`, `DEFINE`, `IF`/`ELSE`/`END_IF`, `WHILE`/`END_WHILE`,
+  `FUNCTION`/`END_FUNCTION`/`RETURN`, the full operator table, and `$variable`
+  substitution in `STRING` - a bounded interpreter that decides which line runs
+  next, so the player never learned the language.
+- **DuckyScript 1.0 compatibility**: hyphenated chords (`CTRL-ALT-DELETE`),
+  `REM_BLOCK`, `HOLD`/`RELEASE`, `RESET`, `WAIT_FOR_*` lock keys, `RANDOM_*`,
+  `STRINGDELAY`, `NUMLOCK`/`SCROLLLOCK`/`PAUSE`, and the macOS `OPTION`/`CMD`
+  aliases.
+- **International layouts that type accents as KEYS.** On a German keyboard
+  a-umlaut is one keystroke; it was being sent as a seven-report Alt+numpad
+  escape that needed Num Lock, a registry setting, and failed on a login screen.
+  Direct keys for DE/FR/ES/IT/PT/CH/SE/UK plus dead-key sequences for the
+  accented vowels Spanish, Portuguese and German actually need.
+  (Layout data follows SpacehuhnTech/WiFiDuck, MIT.)
+- **Multi-user RBAC**: viewer / operator / admin accounts, persisted to NVS,
+  enforced on every endpoint. The last admin cannot be deleted.
+- **Structured settings API** and a real settings form - no more editing a raw
+  config blob.
+- **Session expiry warning** with an explicit "stay signed in"; polling
+  deliberately does NOT extend a session.
+- A **7x12 screen font** drawn so 5/S, 6/G, 8/B, 2/Z and 0/O cannot be confused
+  when reading a credential off a 1.14" panel.
+- **Injection log** to the card: every keystroke with retries, timing and
+  result, so a dropped character can be diagnosed from evidence.
+- Test payloads: `SELFTEST`, `SPEEDTEST`, `KEYTEST`, `SCRIPTED`.
+
+### Tests
+- **381 host checks**, including an ASan/UBSan fuzz suite and the buffer builder.
+
 ## [0.6.0] - 2026-08-29
 First release verified **on real hardware**, and the bugs that found were the
 point. Plus a scannable console QR, an authorised factory reset, and opt-in

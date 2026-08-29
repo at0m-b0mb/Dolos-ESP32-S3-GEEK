@@ -1,5 +1,6 @@
 #include "lint.h"
 #include "unicode.h"
+#include "dscript.h"
 #include "hid_keys.h"
 #include <string.h>
 #include <ctype.h>
@@ -54,10 +55,23 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
     ducky_state_t st; ducky_state_init(&st);
     st.layout = layout; st.target_os = os;
 
-    ducky_action_t acts[192];
+    /* The linter only asks whether a line parses to anything, and the commands
+     * that reach this call emit a handful of actions at most (STRING and the
+     * delays are handled above). 32 is ample and keeps 2.5 KB off the caller's
+     * stack - lint runs on the UI task and on the console's HTTP task. */
+    ducky_action_t acts[32];
     char line[LINT_LINE_MAX], tok[32];
     int problems = 0, kept = 0, lineno = 0;
     bool any_cmd = false;                    /* has a repeatable command appeared? */
+    bool in_rem = false;                     /* inside REM_BLOCK ... END_REM       */
+
+    /* Structural problems (an IF with no END_IF) are found by the interpreter
+     * itself, so the linter and the runtime cannot disagree about them. */
+    static dscript_t probe;
+    if (!dscript_init(&probe, text ? text : "")) {
+        add(out, max, &kept, dscript_error_line(&probe), dscript_error(&probe));
+        return 1;
+    }
 
     const char *p = text ? text : "";
     while (*p) {
@@ -68,6 +82,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
             else truncated = true;
             p++;
         }
+        while (l > 0 && line[l - 1] == '\r') l--;   /* CRLF payloads */
         line[l] = 0;
         if (*p == '\n') p++;
         lineno++;
@@ -75,6 +90,10 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
         const char *rest = first_tok(line, tok, sizeof(tok));
         if (tok[0] == 0) continue;                       /* blank */
         if (tok[0] == '#' || lkw(tok, "REM")) continue;  /* comment */
+        if (dscript_is_consumed(&probe, line)) { any_cmd = true; continue; }
+        if (lkw(tok, "REM_BLOCK")) { in_rem = true; continue; }
+        if (lkw(tok, "END_REM"))   { in_rem = false; continue; }
+        if (in_rem) continue;
 
         if (truncated) {
             problems++;
@@ -82,7 +101,8 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
         }
 
         /* --- targeted argument checks the runtime parser is lenient about --- */
-        if (lkw(tok, "DELAY") || lkw(tok, "DEFAULTDELAY") || lkw(tok, "DEFAULT_DELAY")) {
+        if (lkw(tok, "DELAY") || lkw(tok, "DEFAULTDELAY") || lkw(tok, "DEFAULT_DELAY") ||
+            lkw(tok, "STRINGDELAY") || lkw(tok, "STRING_DELAY")) {
             if (!all_digits(rest)) {
                 problems++; add(out, max, &kept, lineno, "DELAY needs a number of ms");
             } else {
@@ -120,8 +140,12 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
                     uint8_t k, m;
                     if (!hid_from_ascii_layout((char)cp, layout, &k, &m)) bad = true;
                 } else {
-                    ducky_action_t probe[24];
-                    if (unicode_seq(cp, os, probe, 24) == 0) bad = true;
+                    uint8_t uk, um;
+                    uint8_t dk, dm, bk, bm;
+                    if (layout_utf8_key(layout, cp, &uk, &um)) continue;  /* on the layout */
+                    if (layout_utf8_combo(layout, cp, &dk, &dm, &bk, &bm)) continue;
+                    ducky_action_t probe2[24];
+                    if (unicode_seq(cp, os, probe2, 24) == 0) bad = true;
                 }
             }
             if (bad) {

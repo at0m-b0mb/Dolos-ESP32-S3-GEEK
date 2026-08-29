@@ -16,6 +16,7 @@ typedef struct {
     volatile bool *abort;                                   /* set to stop mid-run */
     void (*progress)(int cur_line, int total_lines, void *user);
     void *user;
+    const char *name;           /* payload name, for the injection log */
     kb_layout_t layout;         /* target keyboard layout            */
     target_os_t os;             /* OS for Unicode "type anything"     */
     bool        dry_run;        /* preview only - never send a key    */

@@ -135,3 +135,35 @@ void cv_text_center(canvas_t *cv, int cx, int y, const char *s, uint16_t fg, int
 {
     cv_text(cv, cx - cv_text_width(s, scale) / 2, y, s, fg, bg, scale);
 }
+
+/* ---- the larger credential face ---------------------------------------- */
+static int cv_char_big(canvas_t *cv, int x, int y, char c, uint16_t fg, int32_t bg, int scale)
+{
+    if (scale < 1) scale = 1;
+    uint8_t uc = (uint8_t)c;
+    if (uc >= 'a' && uc <= 'z') uc = (uint8_t)(uc - 'a' + 'A');   /* face is caps */
+    if (uc < FONT7X12_FIRST || uc > FONT7X12_LAST) uc = ' ';
+    const uint8_t *g = &aegis_font7x12[(uc - FONT7X12_FIRST) * FONT7X12_H];
+    for (int row = 0; row < FONT7X12_H; row++) {
+        uint8_t bits = g[row];
+        for (int col = 0; col < FONT7X12_W; col++) {
+            bool on = bits & (0x80 >> col);
+            if (on) cv_fill_rect(cv, x + col * scale, y + row * scale, scale, scale, fg);
+            else if (bg >= 0) cv_fill_rect(cv, x + col * scale, y + row * scale, scale, scale, (uint16_t)bg);
+        }
+    }
+    return x + (FONT7X12_W + 1) * scale;
+}
+
+int cv_text_big(canvas_t *cv, int x, int y, const char *s, uint16_t fg, int32_t bg, int scale)
+{
+    for (; s && *s; s++) x = cv_char_big(cv, x, y, *s, fg, bg, scale);
+    return x;
+}
+
+int cv_text_big_width(const char *s, int scale)
+{
+    if (scale < 1) scale = 1;
+    int n = 0; for (; s && *s; s++) n++;
+    return n * (FONT7X12_W + 1) * scale;
+}

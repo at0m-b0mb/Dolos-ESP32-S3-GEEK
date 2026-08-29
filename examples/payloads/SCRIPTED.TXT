@@ -1,0 +1,48 @@
+REM ============================================================
+REM  DuckyScript 3 language demo - variables, loops, conditions
+REM  and functions. Types text only; nothing executes.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+VAR $total = 0
+VAR $i = 1
+
+STRING === DUCKYSCRIPT 3 DEMO ===
+ENTER
+
+REM --- a counted loop that also accumulates ---
+WHILE ($i <= 5)
+STRING line $i of 5
+ENTER
+$total = $total + $i
+$i = $i + 1
+END_WHILE
+
+STRING sum of 1..5 = $total
+ENTER
+
+REM --- a condition on the computed value ---
+IF ($total == 15) THEN
+STRING arithmetic OK
+ELSE
+STRING arithmetic WRONG
+END_IF
+ENTER
+
+REM --- a function, called twice ---
+FUNCTION banner()
+STRING ----------------------------
+ENTER
+END_FUNCTION
+
+banner
+STRING operators: $total * 2 is computed below
+ENTER
+VAR $double = $total * 2
+STRING double = $double
+ENTER
+banner
+
+STRING === DEMO END ===
+ENTER

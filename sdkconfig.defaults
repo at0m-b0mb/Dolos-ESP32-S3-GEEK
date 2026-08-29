@@ -24,3 +24,10 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # long filenames so payloads can be named readably on the SD picker
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=64
+
+# --- scheduler tick -------------------------------------------------------
+# 1 kHz, NOT the 100 Hz default. At 100 Hz one tick is 10 ms, so
+# pdMS_TO_TICKS(5) rounds DOWN TO ZERO and the delay silently disappears -
+# which is exactly what made the "fast" and "balanced" typing profiles emit
+# keystrokes back-to-back with no pacing at all, and drop characters.
+CONFIG_FREERTOS_HZ=1000

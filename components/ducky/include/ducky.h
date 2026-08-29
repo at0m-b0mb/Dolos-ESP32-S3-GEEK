@@ -28,7 +28,8 @@ typedef enum {
     DUCKY_MOUSE,     /* mouse move/click/wheel                     */
     DUCKY_CONSUMER,  /* media / consumer usage                     */
     DUCKY_HOLD,      /* press+HOLD a.mods across following keys     */
-    DUCKY_RELEASE    /* release all held modifiers                 */
+    DUCKY_RELEASE,   /* release all held modifiers                 */
+    DUCKY_WAIT       /* block until a host lock-key condition holds  */
 } ducky_action_kind_t;
 
 /* Target OS for the Unicode "type anything" input method. */
@@ -43,6 +44,8 @@ typedef struct {
     int8_t   wheel;     /* MOUSE wheel                                */
     uint8_t  buttons;   /* MOUSE buttons bitmap (1=L,2=R,4=M); click  */
     uint16_t consumer;  /* CONSUMER (media) usage code                */
+    uint8_t  wait_mask; /* WAIT: which lock LED (HID_LED_*)           */
+    uint8_t  wait_want; /* WAIT: 0=off 1=on 2=change                  */
 } ducky_action_t;
 
 typedef struct {
@@ -51,6 +54,9 @@ typedef struct {
     int         repeat;          /* pending REPEAT count (player consumes)   */
     kb_layout_t layout;          /* target keyboard layout for STRING/chars  */
     target_os_t target_os;       /* OS for Unicode (STRING non-ASCII/UNICODE)*/
+    uint32_t    string_delay_ms;  /* extra pause BETWEEN characters of a STRING */
+    bool        in_rem_block;     /* inside REM_BLOCK ... END_REM               */
+    uint32_t    rng_state;        /* RANDOM_*: deterministic unless reseeded    */
 } ducky_state_t;
 
 void ducky_state_init(ducky_state_t *st);
@@ -58,6 +64,19 @@ void ducky_state_init(ducky_state_t *st);
 /* Parse ONE line into up to `max` actions. Returns the count written (may be 0
  * for comments / DEFAULTDELAY). For REPEAT n, returns 0 and sets st->repeat=n:
  * the player replays st->last_cmd n more times. */
+/* Host LED bits, as reported back over HID OUT. */
+#define HID_LED_NUMLOCK  0x01
+#define HID_LED_CAPSLOCK 0x02
+#define HID_LED_SCROLL   0x04
+
+/* Caps Lock lives in the OPERATING SYSTEM, not in the keyboard, so a payload
+ * that types "Hello" into a machine with Caps Lock on gets "hELLO" - the case
+ * of every letter is inverted. Rather than toggling the host's lock state
+ * (which changes something we were not asked to change, and leaves it changed
+ * if the payload aborts), flip the shift bit for A-Z so the text arrives
+ * exactly as written. Returns the modifiers to send for this key. */
+uint8_t ducky_apply_caps(uint8_t key, uint8_t mods, uint8_t leds);
+
 int ducky_parse_line(ducky_state_t *st, const char *line,
                      ducky_action_t *out, int max);
 

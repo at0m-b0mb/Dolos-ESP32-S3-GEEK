@@ -73,4 +73,52 @@ TEST_MAIN_BEGIN
         CHECK(ct_memcmp("abcd", "abcd", 4) == 0, "equal -> 0");
         CHECK(ct_memcmp("abcd", "abce", 4) != 0, "differ -> nonzero");
     }
+
+    SUITE("auth: a session reports its remaining time and can be extended");
+    {
+        auth_store_t e2; auth_init(&e2, mock_hash, mock_rng, 1000);
+        auth_session_t *x = auth_session_create(&e2, ROLE_ADMIN, 1000, 60000);
+        CHECK(auth_session_remaining_ms(x, 1000) == 60000, "full ttl at creation");
+        CHECK(auth_session_remaining_ms(x, 31000) == 30000, "counts down");
+        CHECK(auth_session_remaining_ms(x, 61000) == 0, "zero once expired");
+        CHECK(auth_session_remaining_ms(x, 99000) == 0, "stays zero past expiry");
+
+        /* extending restores the full window, and the session resolves again */
+        auth_session_extend(x, 50000, 60000);
+        CHECK(auth_session_remaining_ms(x, 50000) == 60000, "extend restores the ttl");
+        char tok[33]; strcpy(tok, x->token);
+        CHECK(auth_session_lookup(&e2, tok, 100000) != NULL,
+              "an extended session survives past its original expiry");
+    }
+
+    SUITE("auth: multiple accounts, roles, and deleting them safely");
+    {
+        auth_store_t m; auth_init(&m, mock_hash, mock_rng, 1000);
+        CHECK(auth_set_user(&m, "root", "pw-admin", ROLE_ADMIN), "add admin");
+        CHECK(auth_set_user(&m, "kim",  "pw-oper",  ROLE_OPERATOR), "add operator");
+        CHECK(auth_set_user(&m, "sam",  "pw-view",  ROLE_VIEWER), "add viewer");
+        CHECK(auth_user_count(&m) == 3, "three accounts, got %d", auth_user_count(&m));
+
+        /* each authenticates as its own role, and not as another */
+        CHECK(auth_verify(&m, "kim", "pw-oper") == ROLE_OPERATOR, "operator signs in");
+        CHECK(auth_verify(&m, "kim", "pw-view") == ROLE_NONE, "wrong password refused");
+        CHECK(auth_verify(&m, "sam", "pw-view") == ROLE_VIEWER, "viewer signs in");
+
+        /* enumeration */
+        const char *n = NULL; role_t r = ROLE_NONE;
+        CHECK(auth_user_at(&m, 0, &n, &r) && r == ROLE_ADMIN, "first slot is the admin");
+        CHECK(!auth_user_at(&m, 3, &n, &r), "no fourth account");
+
+        /* the last admin cannot be removed */
+        CHECK(auth_delete_user(&m, "sam"), "a viewer can be deleted");
+        CHECK(auth_user_count(&m) == 2, "two left");
+        CHECK(!auth_delete_user(&m, "root"), "the LAST admin must not be deletable");
+        CHECK(auth_verify(&m, "root", "pw-admin") == ROLE_ADMIN, "and still works");
+
+        /* with two admins, one may go */
+        CHECK(auth_set_user(&m, "alex", "pw-admin2", ROLE_ADMIN), "second admin");
+        CHECK(auth_delete_user(&m, "root"), "one of two admins can be deleted");
+        CHECK(auth_verify(&m, "root", "pw-admin") == ROLE_NONE, "deleted account cannot sign in");
+        CHECK(!auth_delete_user(&m, "nobody"), "deleting an unknown user fails");
+    }
 TEST_MAIN_END
