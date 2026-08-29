@@ -52,16 +52,21 @@ static void draw_header(canvas_t *cv, const dui_state_t *st)
     cv_fill_rect(cv, 0, 0, W, 15, DU_PANEL);
     draw_kbd(cv, 4, 2, DU_ACCENT);
     cv_text(cv, 27, 1, "DOLOS", DU_INK, -1, 2);
-    if (st->dry_run) {
-        int x = 92;
-        cv_fill_rect(cv, x, 3, 34, 10, DU_ARMED);
-        cv_text(cv, x + 3, 4, "DRY", DU_BG, -1, 1);
-    }
+    if (st->wifi_on) cv_fill_circle(cv, 80, 7, 3, DU_SAFE);   /* wireless console live */
+    if (st->remote_fire_enabled) { cv_fill_rect(cv, 90, 3, 24, 10, DU_FIRE); cv_text(cv, 93, 4, "RF", DU_BG, -1, 1); }
+    else if (st->dry_run)        { cv_fill_rect(cv, 90, 3, 34, 10, DU_ARMED); cv_text(cv, 93, 4, "DRY", DU_BG, -1, 1); }
     const char *u = st->usb_mounted ? "USB LINK" : "NO HOST";
     uint16_t uc = st->usb_mounted ? DU_SAFE : DU_DIM;
     cv_fill_circle(cv, W - cv_text_width(u, 1) - 9, 7, 3, uc);
     cv_text(cv, W - cv_text_width(u, 1) - 3, 4, u, uc, -1, 1);
-    cv_hline(cv, 0, 15, W, DU_ACCENT);
+    cv_hline(cv, 0, 15, W, st->remote_fire_enabled ? DU_FIRE : DU_ACCENT);
+}
+
+/* persistent, non-covert banner whenever the admin has enabled remote fire */
+static void draw_rf_banner(canvas_t *cv)
+{
+    cv_fill_rect(cv, 0, H - 25, W, 11, DU_FIRE);
+    cv_text_center(cv, W / 2, H - 24, "REMOTE FIRE ARMED", DU_BG, -1, 1);
 }
 
 static void draw_footer(canvas_t *cv, const dui_state_t *st)
@@ -107,7 +112,16 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
             cv_text_center(cv, W / 2, 54, pl, DU_INK, -1, 1);
             cv_text_center(cv, W / 2, 70,
                 st->payload_count > 1 ? "TAP = NEXT   HOLD = ARM" : "HOLD BOOT TO ARM", DU_DIM, -1, 1);
-            cv_text_center(cv, W / 2, 90, "DEVICE WILL NOT TYPE", cv_rgb(90,74,86), -1, 1);
+            if (st->wifi_on) {
+                char ap[40]; snprintf(ap, sizeof(ap), "AP %s", st->wifi_ssid ? st->wifi_ssid : "-");
+                cv_text_center(cv, W / 2, 88, ap, DU_SAFE, -1, 1);
+                if (st->admin_pw) {
+                    char pw[32]; snprintf(pw, sizeof(pw), "PW %s", st->admin_pw);
+                    cv_text_center(cv, W / 2, 100, pw, DU_ARMED, -1, 1);
+                }
+            } else {
+                cv_text_center(cv, W / 2, 90, "DEVICE WILL NOT TYPE", cv_rgb(90,74,86), -1, 1);
+            }
             break;
         }
         case DUI_PINENTRY: {
@@ -148,6 +162,7 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
             cv_text_center(cv, W / 2, 78, "TAP TO RETURN TO SAFE", DU_DIM, -1, 1);
             break;
     }
+    if (st->remote_fire_enabled) draw_rf_banner(cv);
     draw_header(cv, st);
     draw_footer(cv, st);
 }

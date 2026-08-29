@@ -85,6 +85,16 @@ REPEAT 3                  REM  repeat the previous command 3 more times
 
 > Layout is US-QWERTY today. International keyboard-layout profiles are on the [roadmap](#-roadmap).
 
+## 📡 Wireless console (v0.3)
+
+Set `wifi=ap` in `DOLOS.CFG` and Dolos raises a **WPA2 SoftAP** with a secure web console at `http://192.168.4.1` — the LCD shows the SSID and, on first run, a random admin password.
+
+- **Manage remotely** — browse / **view / edit / upload** payloads, edit config, read the audit log, all from the browser (like pico-ducky, but access-controlled).
+- **Secure by construction** — **RBAC** (viewer / operator / admin), **PBKDF2-HMAC-SHA256** salted credentials, opaque **session cookies** (`HttpOnly; SameSite=Strict`), **CSRF** tokens on every write, failed-login **lockout**, constant-time comparisons. Traffic rides the **WPA2-encrypted** link.
+- **Admin-gated remote fire** — the physical BOOT arming you love is unchanged. Remote fire only works when an **admin enables it**, and while enabled the LCD shows a persistent **`REMOTE FIRE ARMED`** banner, so it can never fire covertly. A remote fire still runs the same abortable countdown at the device.
+
+> Security *logic* is host-unit-tested; the on-device server + WiFi are compile-verified and pending hardware bring-up. Transport is WPA2 in v0.3; per-device HTTPS is next. See [`examples/DOLOS.CFG`](examples/DOLOS.CFG).
+
 ## 🚀 Flash it
 
 **Easiest — browser flasher:** open **<https://at0m-b0mb.github.io/Dolos-ESP32-S3-GEEK/>** in Chrome/Edge, tick the authorization box, click *Install Dolos*, pick the port. Done.

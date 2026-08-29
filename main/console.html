@@ -1,0 +1,252 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dolos Console</title>
+<style>
+:root{
+  --bg:#0a0810;--bg2:#140b12;--card:#1a0f18;--card2:#20131e;--rim:#33202e;
+  --ink:#efe6ee;--dim:#a98fa4;--dimmer:#6f5866;--accent:#e6465a;--accent2:#ff6274;
+  --green:#3cc882;--amber:#f0b43c;--red:#f0545f;--blue:#5aa0ff;
+  --shadow:0 10px 40px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:radial-gradient(130% 90% at 50% -10%,#3a1220 0%,#160c14 46%,#0a0810 100%) fixed;
+  color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+a{color:var(--accent2)}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:.6em 1.1em;font-weight:600;
+  background:linear-gradient(180deg,var(--accent),#b52640);color:#fff;transition:transform .07s,opacity .2s}
+button:hover{transform:translateY(-1px)}button:disabled{opacity:.4;cursor:not-allowed;transform:none}
+button.ghost{background:#2a1622;color:var(--ink);border:1px solid var(--rim)}
+button.warn{background:linear-gradient(180deg,var(--amber),#b9860f);color:#231600}
+input,textarea,select{font:inherit;background:#120810;color:var(--ink);border:1px solid var(--rim);
+  border-radius:10px;padding:.6em .7em;width:100%}
+textarea{resize:vertical;min-height:220px}
+.mono textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+label{display:block;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase;color:var(--dimmer);margin:0 0 .35em}
+
+/* login */
+#login{min-height:100%;display:grid;place-items:center;padding:24px}
+.logincard{width:100%;max-width:360px;background:linear-gradient(180deg,var(--card2),var(--card));
+  border:1px solid var(--rim);border-radius:20px;padding:30px 26px;box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:6px}
+.kbd{width:46px;height:34px;border-radius:8px;background:linear-gradient(180deg,#ff5c72,#b52640);position:relative;flex:0 0 auto}
+.kbd::before{content:"";position:absolute;inset:8px 7px;border-radius:3px;
+  background:radial-gradient(circle at 6px 6px,#160810 1.6px,transparent 1.7px) 0 0/9px 8px}
+h1{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;margin:0;font-size:1.7rem}
+.tag{text-align:center;color:var(--dim);font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;margin:.2em 0 22px}
+.field{margin-bottom:14px}
+.err{color:var(--red);font-size:.86rem;min-height:1.2em;margin-top:4px}
+.note{color:var(--dimmer);font-size:.74rem;text-align:center;margin-top:16px}
+
+/* app */
+#app{display:none;max-width:1000px;margin:0 auto;padding:18px 18px 60px}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.top .kbd{width:34px;height:26px}
+.top h1{font-size:1.3rem}
+.spacer{flex:1}
+.chip{font-size:.74rem;padding:.3em .7em;border-radius:999px;border:1px solid var(--rim);background:#241019;color:var(--dim)}
+.chip.admin{color:var(--accent2);border-color:#5a2131}
+
+.grid{display:grid;gap:16px;grid-template-columns:1fr}
+@media(min-width:760px){.grid.two{grid-template-columns:1fr 1fr}}
+.card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--rim);
+  border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+.card h2{margin:0 0 14px;font-size:.82rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px}
+.tile{background:#120810;border:1px solid var(--rim);border-radius:12px;padding:11px 12px}
+.tile .k{font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dimmer)}
+.tile .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.05rem;margin-top:3px}
+.state{font-weight:700}
+.s-SAFE{color:var(--green)}.s-ARMED,.s-PIN{color:var(--amber)}
+.s-FIRING,.s-RUNNING{color:var(--red)}.s-SENT{color:var(--blue)}
+
+.rf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:12px;border-radius:12px;
+  background:#160a10;border:1px solid var(--rim)}
+.rf.on{border-color:var(--red);background:#25090e;box-shadow:0 0 0 1px rgba(240,80,95,.4) inset}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer)}
+.rf.on .dot{background:var(--red);box-shadow:0 0 10px var(--red)}
+
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.tabs button{background:#20131e;border:1px solid var(--rim);color:var(--dim);font-weight:600}
+.tabs button.active{background:linear-gradient(180deg,var(--accent),#b52640);color:#fff;border-color:transparent}
+.plist{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
+.plist .item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#120810;
+  border:1px solid var(--rim);border-radius:10px;padding:.5em .7em;cursor:pointer}
+.plist .item.active{border-color:var(--accent);color:var(--accent2)}
+.log{white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
+  background:#0d0509;border:1px solid var(--rim);border-radius:10px;padding:12px;max-height:340px;overflow:auto;color:#cbb6c4}
+.hidden{display:none!important}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#20131e;border:1px solid var(--rim);
+  padding:.7em 1.1em;border-radius:10px;box-shadow:var(--shadow);opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+</style></head>
+<body>
+
+<!-- LOGIN -->
+<section id="login">
+  <div class="logincard">
+    <div class="brand"><span class="kbd"></span><h1>DOLOS</h1></div>
+    <div class="tag">Secure Console</div>
+    <div class="field"><label>Username</label><input id="u" autocomplete="username" autofocus></div>
+    <div class="field"><label>Password</label><input id="p" type="password" autocomplete="current-password"></div>
+    <button id="loginBtn" style="width:100%">Sign in</button>
+    <div class="err" id="loginErr"></div>
+    <div class="note">Authorized security testing only.</div>
+  </div>
+</section>
+
+<!-- APP -->
+<main id="app">
+  <div class="top">
+    <span class="kbd"></span><h1>DOLOS</h1>
+    <span class="spacer"></span>
+    <span class="chip" id="roleChip">—</span>
+    <button class="ghost" id="logoutBtn">Log out</button>
+  </div>
+
+  <div class="grid two">
+    <div class="card">
+      <h2>Status</h2>
+      <div class="tiles" id="tiles"></div>
+      <div class="rf" id="rf">
+        <span class="dot"></span>
+        <div style="flex:1"><b id="rfLabel">Remote fire disabled</b>
+          <div style="color:var(--dim);font-size:.8rem">Physical arming always works at the device.</div></div>
+        <button class="warn admin-only" id="rfToggle">Enable</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="armBtn" disabled>Arm &amp; fire remotely</button>
+        <button class="ghost" id="abortBtn">Abort</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Console</h2>
+      <div class="tabs">
+        <button data-tab="payloads" class="active">Payloads</button>
+        <button data-tab="config" class="admin-only">Config</button>
+        <button data-tab="audit">Audit</button>
+      </div>
+
+      <div id="tab-payloads">
+        <div class="plist" id="plist"></div>
+        <div style="margin-top:12px" class="mono">
+          <label id="edName">Editor</label>
+          <textarea id="editor" spellcheck="false" placeholder="Select a payload to view/edit"></textarea>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <input id="newName" placeholder="new-payload.txt" style="max-width:220px">
+          <button class="ghost admin-only" id="saveBtn">Save</button>
+        </div>
+      </div>
+
+      <div id="tab-config" class="hidden mono">
+        <label>DOLOS.CFG (secrets redacted)</label>
+        <textarea id="cfg" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:10px"><button class="ghost" id="cfgSave">Save config</button></div>
+      </div>
+
+      <div id="tab-audit" class="hidden">
+        <div class="row" style="margin-bottom:10px"><button class="ghost" id="auditRefresh">Refresh</button></div>
+        <div class="log" id="auditLog">—</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let CSRF="",ROLE="none",curPayload="";
+const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
+const toast=(m)=>{const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800)};
+async function api(path,opt={}){
+  opt.credentials="same-origin";opt.headers=opt.headers||{};
+  if(opt.method&&opt.method!=="GET")opt.headers["X-CSRF"]=CSRF;
+  const r=await fetch(path,opt);
+  if(r.status===401){show("login");}
+  return r;
+}
+function show(v){$("#login").style.display=v==="login"?"grid":"none";$("#app").style.display=v==="app"?"block":"none";}
+function applyRole(){const admin=ROLE==="admin";$$(".admin-only").forEach(e=>e.style.display=admin?"":"none");
+  $("#roleChip").textContent=ROLE;$("#roleChip").classList.toggle("admin",admin);}
+
+// login
+$("#loginBtn").onclick=async()=>{
+  $("#loginErr").textContent="";
+  const body=`user=${encodeURIComponent($("#u").value)}&pass=${encodeURIComponent($("#p").value)}`;
+  const r=await fetch("/api/login",{method:"POST",credentials:"same-origin",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+  if(r.ok){const j=await r.json();CSRF=j.csrf;ROLE=j.role;applyRole();show("app");boot();}
+  else{const j=await r.json().catch(()=>({}));$("#loginErr").textContent=
+    r.status===429?"Too many attempts — locked, wait a moment.":"Invalid credentials.";}
+};
+$("#p").addEventListener("keydown",e=>{if(e.key==="Enter")$("#loginBtn").click()});
+$("#logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});location.reload()};
+
+// status
+const TILES=[["mode","MODE","state"],["payload","PAYLOAD"],["layout","LAYOUT"],
+  ["speed","SPEED"],["usb","USB"],["leds","LEDS"]];
+function renderStatus(s){
+  $("#tiles").innerHTML=TILES.map(([k,lab,cls])=>{
+    let v=s[k];
+    if(k==="usb")v=s.usb?"link":"—";
+    if(k==="payload")v=(s.count>1?`${s.idx}/${s.count} `:"")+s.payload;
+    if(k==="leds"){const b=s.leds||0;v=((b&2)?"C":"·")+((b&1)?"N":"·")+((b&4)?"S":"·");}
+    const c=cls?`state s-${s.mode}`:"";
+    return `<div class="tile"><div class="k">${lab}</div><div class="v ${c}">${v}</div></div>`;
+  }).join("");
+  const on=!!s.remote_fire;const rf=$("#rf");rf.classList.toggle("on",on);
+  $("#rfLabel").textContent=on?"REMOTE FIRE ENABLED":"Remote fire disabled";
+  $("#rfToggle").textContent=on?"Disable":"Enable";
+  $("#armBtn").disabled=!on||!(ROLE==="admin"||ROLE==="operator");
+}
+async function poll(){try{const r=await api("/api/status");if(r.ok)renderStatus(await r.json());}catch(e){}}
+
+// payloads
+async function loadPayloads(){
+  const r=await api("/api/payloads");if(!r.ok)return;const j=await r.json();
+  $("#plist").innerHTML=(j.payloads||[]).map(n=>
+    `<div class="item ${n===curPayload?"active":""}" data-n="${n}"><span class="mono">${n}</span><span>›</span></div>`
+  ).join("")||'<div style="color:var(--dimmer)">No payloads on the SD card.</div>';
+  $$("#plist .item").forEach(el=>el.onclick=()=>openPayload(el.dataset.n));
+}
+async function openPayload(n){
+  curPayload=n;const r=await api("/api/payload?name="+encodeURIComponent(n));
+  $("#editor").value=r.ok?await r.text():"";$("#edName").textContent="Editor — "+n;$("#newName").value=n;loadPayloads();
+}
+$("#saveBtn").onclick=async()=>{
+  const n=$("#newName").value.trim();if(!n){toast("Name required");return;}
+  const r=await api("/api/payload?name="+encodeURIComponent(n),{method:"PUT",body:$("#editor").value});
+  toast(r.ok?"Saved "+n:"Save failed");if(r.ok){curPayload=n;loadPayloads();}
+};
+
+// config + audit
+async function loadConfig(){const r=await api("/api/config");if(r.ok)$("#cfg").value=await r.text();}
+$("#cfgSave").onclick=async()=>{const r=await api("/api/config",{method:"POST",body:$("#cfg").value});toast(r.ok?"Config saved":"Save failed");};
+async function loadAudit(){const r=await api("/api/audit");$("#auditLog").textContent=r.ok?(await r.text()||"—"):"—";}
+$("#auditRefresh").onclick=loadAudit;
+
+// remote fire + arm
+$("#rfToggle").onclick=async()=>{const on=$("#rfLabel").textContent.includes("ENABLED");
+  await api("/api/remotefire",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"enable="+(on?0:1)});poll();};
+$("#armBtn").onclick=async()=>{if(!confirm("Fire the selected payload on the target now?"))return;
+  const r=await api("/api/arm",{method:"POST"});toast(r.ok?"Firing — abortable at the device":"Arm refused");};
+$("#abortBtn").onclick=async()=>{await api("/api/abort",{method:"POST"});toast("Abort sent");};
+
+// tabs
+$$(".tabs button").forEach(b=>b.onclick=()=>{
+  $$(".tabs button").forEach(x=>x.classList.remove("active"));b.classList.add("active");
+  ["payloads","config","audit"].forEach(t=>$("#tab-"+t).classList.toggle("hidden",t!==b.dataset.tab));
+  if(b.dataset.tab==="config")loadConfig();if(b.dataset.tab==="audit")loadAudit();
+});
+
+function boot(){loadPayloads();poll();setInterval(poll,3000);}
+// try to resume an existing session
+(async()=>{const r=await fetch("/api/status",{credentials:"same-origin"});
+  if(r.ok){/* cookie valid but we lack csrf -> require re-login for writes */show("login");}else show("login");})();
+</script>
+</body></html>

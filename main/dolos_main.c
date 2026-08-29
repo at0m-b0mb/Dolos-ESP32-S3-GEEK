@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
@@ -32,6 +33,9 @@
 #include "payload.h"
 #include "dconfig.h"
 #include "layout.h"
+#include "net_wifi.h"
+#include "console_server.h"
+#include "console_bridge.h"
 
 static const char *TAG = "dolos";
 
@@ -58,7 +62,16 @@ static uint32_t s_run_count;
 static char s_pin_buf[9];
 static int  s_pin_pos, s_pin_cur;
 
+/* wireless console shared state */
+static SemaphoreHandle_t s_lock;
+static volatile bool     g_remote_fire_enabled;
+static volatile int      g_remote_req;      /* 0 none, 1 arm, 2 abort */
+static bool              g_wifi_up;
+static char              g_admin_pw_show[20];
+
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+static void lock(void)   { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
+static void unlock(void) { if (s_lock) xSemaphoreGive(s_lock); }
 
 /* ---- SD ---- */
 static bool sd_mount(void)
@@ -156,6 +169,129 @@ static void payload_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* ---- console bridge (called from the httpd task; guarded by s_lock) ---- */
+static const char *mode_str(dui_mode_t m)
+{
+    switch (m) { case DUI_SAFE: return "SAFE"; case DUI_PINENTRY: return "PIN";
+                 case DUI_ARMED: return "ARMED"; case DUI_COUNTDOWN: return "FIRING";
+                 case DUI_RUNNING: return "RUNNING"; default: return "SENT"; }
+}
+static bool safe_name(const char *n)
+{
+    if (!n || !*n || strstr(n, "..")) return false;
+    for (const char *p = n; *p; p++) if (*p == '/' || *p == '\\') return false;
+    return true;
+}
+
+void bridge_status_json(char *buf, size_t cap)
+{
+    lock();
+    snprintf(buf, cap,
+        "{\"mode\":\"%s\",\"payload\":\"%s\",\"idx\":%d,\"count\":%d,\"layout\":\"%s\","
+        "\"speed\":\"%s\",\"dry\":%s,\"usb\":%s,\"leds\":%d,\"remote_fire\":%s,\"lines\":%d,\"cur\":%d}",
+        mode_str(s_mode), s_payload_name, s_sel + 1, s_npayloads > 0 ? s_npayloads : 1,
+        layout_name(s_cfg.layout), speed_name(s_cfg.speed), s_cfg.dry_run ? "true" : "false",
+        (!s_flash_mode && usb_hid_mounted()) ? "true" : "false", s_flash_mode ? 0 : usb_hid_leds(),
+        g_remote_fire_enabled ? "true" : "false", s_total_lines, s_cur_line);
+    unlock();
+}
+int bridge_list_payloads(char *out, size_t cap)
+{
+    lock();
+    int o = snprintf(out, cap, "{\"payloads\":[");
+    for (int i = 0; i < s_npayloads && o < (int)cap - 72; i++)
+        o += snprintf(out + o, cap - o, "%s\"%s\"", i ? "," : "", s_names[i]);
+    o += snprintf(out + o, cap - o, "]}");
+    unlock();
+    return o;
+}
+int bridge_read_payload(const char *name, char *buf, size_t cap)
+{
+    if (!safe_name(name)) return -1;
+    char path[96]; snprintf(path, sizeof(path), "/sdcard/%s", name);
+    FILE *fp = fopen(path, "r"); if (!fp) return -1;
+    int n = (int)fread(buf, 1, cap - 1, fp); fclose(fp);
+    buf[n < 0 ? 0 : n] = 0; return n;
+}
+bool bridge_write_payload(const char *name, const char *data, size_t len)
+{
+    if (!safe_name(name) || !s_sd_ok || !ends_txt(name)) return false;
+    char path[96]; snprintf(path, sizeof(path), "/sdcard/%s", name);
+    FILE *fp = fopen(path, "w"); if (!fp) return false;
+    fwrite(data, 1, len, fp); fclose(fp);
+    lock(); scan_payloads(); load_selected(); unlock();
+    return true;
+}
+void bridge_get_config_text(char *buf, size_t cap)
+{
+    buf[0] = 0;
+    if (!s_sd_ok) return;
+    FILE *fp = fopen("/sdcard/DOLOS.CFG", "r"); if (!fp) return;
+    char line[160]; size_t o = 0;
+    while (fgets(line, sizeof(line), fp) && o < cap - 80) {
+        const char *red = NULL;
+        if (strstr(line, "wifi_pass") == line || strstr(line, "wifi_password") == line) red = "wifi_pass=***\n";
+        else if (strstr(line, "admin_pass") == line || strstr(line, "admin_password") == line) red = "admin_pass=***\n";
+        o += snprintf(buf + o, cap - o, "%s", red ? red : line);
+    }
+    fclose(fp);
+}
+bool bridge_set_config(const char *text)
+{
+    if (!s_sd_ok) return false;
+    FILE *fp = fopen("/sdcard/DOLOS.CFG", "w"); if (!fp) return false;
+    const char *p = text; char line[192];
+    while (*p) {
+        size_t n = 0; while (*p && *p != '\n' && n < sizeof(line) - 1) line[n++] = *p++;
+        line[n] = 0; if (*p == '\n') p++;
+        if (strstr(line, "wifi_pass=***") || strstr(line, "wifi_password=***"))
+            fprintf(fp, "wifi_pass=%s\n", s_cfg.wifi_pass);
+        else if (strstr(line, "admin_pass=***") || strstr(line, "admin_password=***"))
+            fprintf(fp, "admin_pass=%s\n", s_cfg.admin_pass);
+        else fprintf(fp, "%s\n", line);
+    }
+    fclose(fp);
+    /* reload live settings (layout/speed/dry take effect now; wifi/usb need reboot) */
+    lock();
+    config_defaults(&s_cfg);
+    FILE *rf = fopen("/sdcard/DOLOS.CFG", "r");
+    if (rf) { char cb[512]; int m = (int)fread(cb, 1, sizeof(cb) - 1, rf); fclose(rf);
+              if (m > 0) { cb[m] = 0; config_parse(cb, &s_cfg); } }
+    usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
+    scan_payloads(); load_selected();
+    unlock();
+    return true;
+}
+int bridge_read_audit(char *buf, size_t cap)
+{
+    buf[0] = 0; if (!s_sd_ok) return 0;
+    FILE *fp = fopen("/sdcard/DOLOS_AUDIT.LOG", "r"); if (!fp) return 0;
+    fseek(fp, 0, SEEK_END); long sz = ftell(fp);
+    long off = sz > (long)(cap - 1) ? sz - (long)(cap - 1) : 0;
+    fseek(fp, off, SEEK_SET);
+    int n = (int)fread(buf, 1, cap - 1, fp); fclose(fp);
+    buf[n < 0 ? 0 : n] = 0; return n;
+}
+bool bridge_remote_select(const char *name)
+{
+    lock(); bool ok = false;
+    for (int i = 0; i < s_npayloads; i++) if (strcmp(s_names[i], name) == 0) { s_sel = i; load_selected(); ok = true; break; }
+    unlock(); return ok;
+}
+bool bridge_remote_fire_enabled(void) { return g_remote_fire_enabled; }
+void bridge_set_remote_fire_enabled(bool on)
+{
+    g_remote_fire_enabled = on;
+    ESP_LOGW(TAG, "remote fire %s (via console)", on ? "ENABLED" : "disabled");
+}
+bool bridge_remote_arm(void)
+{
+    if (!g_remote_fire_enabled) return false;
+    lock(); bool ok = (s_mode == DUI_SAFE); if (ok) g_remote_req = 1; unlock();
+    return ok;
+}
+void bridge_remote_abort(void) { lock(); g_remote_req = 2; unlock(); }
+
 static void ui_task(void *arg)
 {
     (void)arg;
@@ -169,6 +305,14 @@ static void ui_task(void *arg)
     for (;;) {
         btn_evt_t e = button_event();
         uint32_t t = now_ms();
+
+        /* admin-gated remote requests from the console (physical arming is
+         * unchanged; remote fire only proceeds while remote_fire is enabled). */
+        int rq = 0;
+        if (s_lock && xSemaphoreTake(s_lock, 0) == pdTRUE) { rq = g_remote_req; g_remote_req = 0; xSemaphoreGive(s_lock); }
+        if (rq == 2) { if (s_mode == DUI_RUNNING) s_abort = true;
+                       else if (s_mode != DUI_SAFE && s_mode != DUI_DONE) s_mode = DUI_SAFE; }
+        else if (rq == 1 && s_mode == DUI_SAFE && g_remote_fire_enabled) { s_mode = DUI_COUNTDOWN; stage_ms = t; }
 
         switch (s_mode) {
         case DUI_SAFE:
@@ -228,6 +372,10 @@ static void ui_task(void *arg)
         st.pin_pos = s_pin_pos;
         st.pin_cur = s_pin_cur;
         st.leds = s_flash_mode ? 0 : usb_hid_leds();
+        st.wifi_on = g_wifi_up;
+        st.wifi_ssid = g_wifi_up ? net_wifi_ssid() : NULL;
+        st.remote_fire_enabled = g_remote_fire_enabled;
+        st.admin_pw = g_admin_pw_show[0] ? g_admin_pw_show : NULL;
         st.countdown = 3 - (int)((t - stage_ms) / 1000);
         if (st.countdown < 1) st.countdown = 1;
         st.anim++;
@@ -266,6 +414,19 @@ void app_main(void)
 
     if (s_flash_mode) ESP_LOGW(TAG, "FLASH MODE (BOOT held) - USB-HID NOT started");
     else              usb_hid_init(s_cfg.usb_vid, s_cfg.usb_pid, s_cfg.usb_mfr, s_cfg.usb_product);
+
+    /* Wireless console (v0.3): WPA2 SoftAP + secure HTTP console. Never in FLASH
+     * MODE. Physical arming is unchanged; remote fire stays admin-gated + visible. */
+    s_lock = xSemaphoreCreateMutex();
+    g_remote_fire_enabled = s_cfg.remote_fire;
+    if (!s_flash_mode && s_cfg.wifi_on) {
+        if (net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass) &&
+            console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {
+            g_wifi_up = true;
+            if (!s_cfg.admin_pass[0])
+                strncpy(g_admin_pw_show, console_admin_password(), sizeof(g_admin_pw_show) - 1);
+        }
+    }
 
     ESP_LOGI(TAG, "Dolos up. mode=%s payloads=%d layout=%s speed=%s dry=%d pin=%s",
              s_flash_mode ? "FLASH" : "HID", s_npayloads, layout_name(s_cfg.layout),

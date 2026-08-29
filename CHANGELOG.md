@@ -2,6 +2,31 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.3.0] - 2026-08-29
+The **wireless console** — remote management over a secure link, with an
+admin-gated remote-fire that never removes the physical-consent safeguard.
+
+### Added — secure wireless console
+- **WPA2 SoftAP** (`wifi=ap`) — never an open AP; all traffic rides the
+  WPA2-encrypted link. Off by default and never started in FLASH MODE.
+- **Web console** with a modern, responsive UI: status dashboard, payload
+  manager (list / **view / edit / upload** — like pico-ducky), config editor
+  (secrets redacted), and audit-log viewer.
+- **Security core** (host-tested, 29 checks): **RBAC** (viewer / operator /
+  admin), **PBKDF2-HMAC-SHA256** salted credentials, opaque **session tokens**
+  (`Secure; HttpOnly; SameSite=Strict` cookies), **CSRF** tokens on every write,
+  failed-login **lockout** with backoff, and **constant-time** comparisons.
+- **Admin-gated remote fire**: physical BOOT arming is unchanged; remote fire
+  only works while an **admin** has enabled it, and while enabled the LCD shows
+  a persistent **REMOTE FIRE ARMED** banner — it can never fire covertly. The
+  device also shows a WiFi indicator and, on first run, the AP SSID + a random
+  admin password.
+
+### Notes
+- The console's security *logic* is unit-tested on the host; the on-device HTTP
+  server + WiFi are compile-verified and pending hardware bring-up.
+- Transport is WPA2 (link-layer) in this release; per-device HTTPS is next.
+
 ## [0.2.0] - 2026-08-29
 A large capability release: faster injection, international layouts, a payload
 picker, and professional/red-team features — still gated for **authorized** use.

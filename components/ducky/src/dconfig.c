@@ -12,7 +12,12 @@ void config_defaults(dolos_config_t *c)
     c->arm_pin[0] = 0;
     c->usb_vid = 0; c->usb_pid = 0;
     c->usb_mfr[0] = 0; c->usb_product[0] = 0;
+    c->wifi_on = false; c->wifi_ssid[0] = 0; c->wifi_pass[0] = 0;
+    c->admin_user[0] = 0; c->admin_pass[0] = 0; c->remote_fire = false;
 }
+
+static void cfg_str(char *dst, size_t cap, const char *val)
+{ strncpy(dst, val, cap - 1); dst[cap - 1] = 0; }
 
 const char *speed_name(dolos_speed_t s)
 {
@@ -66,6 +71,12 @@ void config_parse(const char *text, dolos_config_t *c)
         else if (ieq(key, "usb_pid") || ieq(key, "pid_id") || ieq(key, "pid")) c->usb_pid = (uint16_t)strtol(val, 0, 0);
         else if (ieq(key, "usb_mfr") || ieq(key, "vendor")) { strncpy(c->usb_mfr, val, sizeof(c->usb_mfr)-1); c->usb_mfr[sizeof(c->usb_mfr)-1]=0; }
         else if (ieq(key, "usb_product") || ieq(key, "product")) { strncpy(c->usb_product, val, sizeof(c->usb_product)-1); c->usb_product[sizeof(c->usb_product)-1]=0; }
+        else if (ieq(key, "wifi")) c->wifi_on = ieq(val, "ap") || ieq(val, "on") || truthy(val);
+        else if (ieq(key, "wifi_ssid") || ieq(key, "ssid")) cfg_str(c->wifi_ssid, sizeof(c->wifi_ssid), val);
+        else if (ieq(key, "wifi_pass") || ieq(key, "wifi_password")) cfg_str(c->wifi_pass, sizeof(c->wifi_pass), val);
+        else if (ieq(key, "admin_user")) cfg_str(c->admin_user, sizeof(c->admin_user), val);
+        else if (ieq(key, "admin_pass") || ieq(key, "admin_password")) cfg_str(c->admin_pass, sizeof(c->admin_pass), val);
+        else if (ieq(key, "remote_fire")) c->remote_fire = truthy(val);
         else if (ieq(key, "armpin") || ieq(key, "pin")) {
             size_t i = 0;
             for (const char *q = val; *q && i < sizeof(c->arm_pin) - 1; q++)

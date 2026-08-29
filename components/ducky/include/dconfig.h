@@ -27,6 +27,13 @@ typedef struct {
     uint16_t      usb_pid;
     char          usb_mfr[24];    /* USB manufacturer string         */
     char          usb_product[32];/* USB product string              */
+    /* --- wireless console (v0.3) --- */
+    bool          wifi_on;        /* start the SoftAP + console?     */
+    char          wifi_ssid[32];  /* AP SSID (default Dolos-XXXX)    */
+    char          wifi_pass[64];  /* WPA2 passphrase (>=8, required) */
+    char          admin_user[24]; /* console admin username          */
+    char          admin_pass[32]; /* console admin password (blank = random on LCD) */
+    bool          remote_fire;    /* admin default for remote-fire allow (still visible) */
 } dolos_config_t;
 
 void config_defaults(dolos_config_t *c);

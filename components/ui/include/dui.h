@@ -39,6 +39,10 @@ typedef struct {
     int  pin_pos;              /* digits committed so far          */
     int  pin_cur;             /* current digit being dialed (1-9)  */
     uint8_t  leds;             /* host LED bitmap: exfil return channel */
+    bool     wifi_on;          /* SoftAP + console running               */
+    const char *wifi_ssid;     /* AP SSID (shown on SAFE)                */
+    const char *admin_pw;      /* first-run admin password (NULL to hide) */
+    bool     remote_fire_enabled; /* admin allowed remote fire -> banner  */
     uint16_t anim;
 } dui_state_t;
 
