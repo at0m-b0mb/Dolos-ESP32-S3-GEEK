@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "src/ducky.c" "src/hid_keymap.c" "src/layout.c" "src/dconfig.c" "src/unicode.c"
+    SRCS "src/ducky.c" "src/hid_keymap.c" "src/layout.c" "src/dconfig.c" "src/unicode.c" "src/lint.c" "src/menu.c"
     INCLUDE_DIRS "include"
 )

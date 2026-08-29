@@ -2,6 +2,65 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.5.0] - 2026-08-29
+On-device settings, payload validation, hardening, and a faster engine.
+
+### Added - on-device settings menu (no touchscreen needed)
+- The GEEK has one button and no touch, so the whole settings UI runs on three
+  gestures: **TAP** = next item, **HOLD** = change it, **DOUBLE-TAP** = open or
+  close the menu. Change layout, target OS, speed, dry-run, WiFi console and
+  remote-fire, then **SAVE TO CARD** writes `DOLOS.CFG` back.
+- The gesture recognizer is a pure function of (pressed, now_ms), driven through
+  real timelines by 14 host tests - including "tap then hold" and coarse 50 ms
+  sampling, the two cases that break naive implementations.
+- **`ui_lock` is a level**, for a device nobody should be reconfiguring at the
+  button: `off` (default) / `menu` (no settings screen) / `full` (also no
+  payload switching, so the device does exactly the one job it was configured
+  for). `on` still means `menu`, so existing configs are unaffected. Arming,
+  firing and the console work at every level. The lock is deliberately not a
+  menu item, an unknown value fails *open* rather than into a stuck lock, and
+  the screen says what the buttons will actually do - a `LOCK` badge and
+  `SETTINGS LOCKED`, so a locked device reads as locked rather than broken.
+
+### Added - payload linter
+- Every payload is parse-checked at load. Unknown commands, bad `DELAY`/`UNICODE`
+  arguments, a leading `REPEAT`, over-long lines, and characters that cannot be
+  typed on the selected layout/OS are all caught.
+- A payload with errors **cannot be armed** - the LCD shows the failing line and
+  `ARMING BLOCKED`, and the console reports it too. Typing garbage into someone
+  else's machine is not a recoverable mistake.
+
+### Added - zero-setup wireless console
+- WiFi console is now **on by default**, with **per-device credentials generated
+  on first boot** and kept in NVS: a 10-character WPA2 key and an 8-character
+  admin password, shown on the SAFE screen. There is deliberately **no shipped
+  default credential** - the screen exists so the device can show a unique one.
+- `DOLOS.CFG` still wins if you want to pin your own.
+
+### Changed - performance
+- **ASCII -> HID is a 128-byte lookup** instead of a ~40-branch chain that ran
+  for every character of every `STRING` (~20 comparisons per char at 8000
+  chars/s on the fast profile).
+- **Layout overrides are expanded once** into a direct index instead of being
+  scanned linearly per character (AZERTY was ~10 extra comparisons each).
+- **The display sends only rows that changed.** The old flush byte-swapped all
+  32,400 pixels and pushed 64 KB over SPI every tick - about 13 ms of bus time
+  per frame - even on the SAFE screen where nothing moves. An unchanged frame now
+  costs one memcmp per row and no transfer at all.
+- **Canvas fills clip once and write whole rows** instead of a bounds-checked
+  call per pixel; out-of-bounds pixels are still counted, so the UI overflow
+  guard keeps its exact meaning.
+
+### Added - robustness
+- A **sanitized fuzz suite** (ASan + UBSan) throws ~12,500 malformed inputs at
+  the config parser, DuckyScript parser, linter and UTF-8 decoder: random bytes,
+  truncated multi-byte sequences, over-long lines, empty and degenerate values.
+- `config_defaults()` now zeroes the whole struct, so no uninitialised stack byte
+  can reach a log or the console.
+
+### Tests
+- **225 host checks** (was 131): +14 button, +31 menu, +19 fuzz, +17 lint, +13 UI/config.
+
 ## [0.4.0] - 2026-08-29
 **Type anything, anywhere** — more keyboard layouts and a Unicode input engine.
 

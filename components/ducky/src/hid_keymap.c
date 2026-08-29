@@ -3,43 +3,44 @@
 #include <string.h>
 #include <ctype.h>
 
-/* US-layout ASCII -> (key, needs-shift). Returns false for unmapped bytes. */
+/* US-layout ASCII -> HID usage, as a direct 128-byte lookup.
+ *
+ * This replaced a ~40-branch if/switch chain that ran for EVERY character of
+ * every STRING. One indexed load is constant time and branch-free, which
+ * matters at the 1 ms poll rate the fast speed profile uses: at 8000 chars/s
+ * the old chain averaged ~20 comparisons per character.
+ *
+ * Packing: bit 7 = needs LSHIFT, bits 0..6 = HID usage code (all < 0x80).
+ * A zero entry means "not typable on this layout". Generated from - and
+ * verified byte-identical to - the original branch logic by the keymap tests.
+ */
+static const uint8_t US_ASCII[128] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 0x00 . */
+    0x00, 0x2B, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 0x08 . */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 0x10 . */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /* 0x18 . */
+    0x2C, 0x9E, 0xB4, 0xA0, 0xA1, 0xA2, 0xA4, 0x34,  /* 0x20   */
+    0xA6, 0xA7, 0xA5, 0xAE, 0x36, 0x2D, 0x37, 0x38,  /* 0x28 ( */
+    0x27, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24,  /* 0x30 0 */
+    0x25, 0x26, 0xB3, 0x33, 0xB6, 0x2E, 0xB7, 0xB8,  /* 0x38 8 */
+    0x9F, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A,  /* 0x40 @ */
+    0x8B, 0x8C, 0x8D, 0x8E, 0x8F, 0x90, 0x91, 0x92,  /* 0x48 H */
+    0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A,  /* 0x50 P */
+    0x9B, 0x9C, 0x9D, 0x2F, 0x31, 0x30, 0xA3, 0xAD,  /* 0x58 X */
+    0x35, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A,  /* 0x60 ` */
+    0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12,  /* 0x68 h */
+    0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A,  /* 0x70 p */
+    0x1B, 0x1C, 0x1D, 0xAF, 0xB1, 0xB0, 0xB5, 0x00,  /* 0x78 x */
+};
+
 bool hid_from_ascii(char c, uint8_t *key, uint8_t *mods)
 {
-    uint8_t k = 0, sh = 0;
-    if (c >= 'a' && c <= 'z')      { k = HID_KEY_A + (uint8_t)(c - 'a'); }
-    else if (c >= 'A' && c <= 'Z') { k = HID_KEY_A + (uint8_t)(c - 'A'); sh = 1; }
-    else if (c >= '1' && c <= '9') { k = HID_KEY_1 + (uint8_t)(c - '1'); }
-    else switch (c) {
-        case '0': k = HID_KEY_0; break;
-        case ' ': k = HID_KEY_SPACE; break;
-        case '\n': k = HID_KEY_ENTER; break;
-        case '\t': k = HID_KEY_TAB; break;
-        case '-': k = HID_KEY_MINUS; break;   case '_': k = HID_KEY_MINUS; sh = 1; break;
-        case '=': k = HID_KEY_EQUAL; break;   case '+': k = HID_KEY_EQUAL; sh = 1; break;
-        case '[': k = HID_KEY_LBRACK; break;  case '{': k = HID_KEY_LBRACK; sh = 1; break;
-        case ']': k = HID_KEY_RBRACK; break;  case '}': k = HID_KEY_RBRACK; sh = 1; break;
-        case '\\': k = HID_KEY_BSLASH; break; case '|': k = HID_KEY_BSLASH; sh = 1; break;
-        case ';': k = HID_KEY_SEMI; break;    case ':': k = HID_KEY_SEMI; sh = 1; break;
-        case '\'': k = HID_KEY_QUOTE; break;  case '"': k = HID_KEY_QUOTE; sh = 1; break;
-        case '`': k = HID_KEY_GRAVE; break;   case '~': k = HID_KEY_GRAVE; sh = 1; break;
-        case ',': k = HID_KEY_COMMA; break;   case '<': k = HID_KEY_COMMA; sh = 1; break;
-        case '.': k = HID_KEY_DOT; break;     case '>': k = HID_KEY_DOT; sh = 1; break;
-        case '/': k = HID_KEY_SLASH; break;   case '?': k = HID_KEY_SLASH; sh = 1; break;
-        case '!': k = HID_KEY_1; sh = 1; break;
-        case '@': k = HID_KEY_1 + 1; sh = 1; break;   /* 2 */
-        case '#': k = HID_KEY_1 + 2; sh = 1; break;   /* 3 */
-        case '$': k = HID_KEY_1 + 3; sh = 1; break;   /* 4 */
-        case '%': k = HID_KEY_1 + 4; sh = 1; break;   /* 5 */
-        case '^': k = HID_KEY_1 + 5; sh = 1; break;   /* 6 */
-        case '&': k = HID_KEY_1 + 6; sh = 1; break;   /* 7 */
-        case '*': k = HID_KEY_1 + 7; sh = 1; break;   /* 8 */
-        case '(': k = HID_KEY_1 + 8; sh = 1; break;   /* 9 */
-        case ')': k = HID_KEY_0; sh = 1; break;       /* 0 */
-        default: return false;
-    }
-    if (key)  *key  = k;
-    if (mods) *mods = sh ? HID_MOD_LSHIFT : 0;
+    uint8_t idx = (uint8_t)c;
+    if (idx & 0x80) return false;              /* non-ASCII: caller uses Unicode */
+    uint8_t e = US_ASCII[idx];
+    if (!e) return false;
+    if (key)  *key  = (uint8_t)(e & 0x7F);
+    if (mods) *mods = (e & 0x80) ? HID_MOD_LSHIFT : 0;
     return true;
 }
 

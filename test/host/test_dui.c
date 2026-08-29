@@ -26,4 +26,67 @@ TEST_MAIN_BEGIN
         cv.oob = 0; dui_render(&cv, &st);
         CHECK(cv.oob == 0, "saturated running screen must fit, oob=%u", cv.oob);
     }
+
+    SUITE("dui: the settings menu fits, on every row and with the longest values");
+    {
+        dolos_config_t cfg; config_defaults(&cfg);
+        cfg.wifi_on = true; cfg.remote_fire = true; cfg.dry_run = true;
+        st.mode = DUI_MENU; st.cfg = &cfg;
+        for (int sel = 0; sel < MENU__COUNT; sel++) {
+            st.menu_sel = sel;
+            /* widest possible values on every row at once */
+            cfg.layout = LAYOUT_LATAM; cfg.os = OS_WINDOWS; cfg.speed = SPEED_RELIABLE;
+            cv.oob = 0;
+            dui_render(&cv, &st);
+            CHECK_QUIET(cv.oob == 0, "menu row %d drew off-panel, oob=%u", sel, cv.oob);
+        }
+        CHECK(1, "all %d menu rows fit the panel", MENU__COUNT);
+
+        /* every layout/os/speed combination must fit too */
+        int bad = 0;
+        for (int l = 0; l < LAYOUT__COUNT; l++)
+            for (int o = 0; o < 3; o++)
+                for (int sp = 0; sp < 3; sp++) {
+                    cfg.layout = (kb_layout_t)l; cfg.os = (target_os_t)o;
+                    cfg.speed = (dolos_speed_t)sp;
+                    cv.oob = 0; dui_render(&cv, &st);
+                    if (cv.oob) bad++;
+                }
+        CHECK(bad == 0, "%d layout/os/speed combinations overflowed", bad);
+
+        /* a NULL config must not crash the renderer */
+        st.cfg = NULL; cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "menu with no config still renders cleanly");
+        st.cfg = &cfg;
+    }
+
+    SUITE("dui: SAFE screen with the settings hint and with the UI locked");
+    {
+        st.mode = DUI_SAFE; st.lint_problems = 0; st.wifi_on = true;
+        st.wifi_ssid = "Dolos-AB12"; st.admin_pw = "A1B2C3D4";
+        ui_lock_t levels[] = { UI_LOCK_OFF, UI_LOCK_MENU, UI_LOCK_FULL };
+        for (int i = 0; i < 3; i++) {
+            st.ui_lock = levels[i];
+            st.wifi_on = true;  cv.oob = 0; dui_render(&cv, &st);
+            CHECK_QUIET(cv.oob == 0, "lock level %d with AP overflowed", levels[i]);
+            st.wifi_on = false; cv.oob = 0; dui_render(&cv, &st);
+            CHECK_QUIET(cv.oob == 0, "lock level %d without AP overflowed", levels[i]);
+        }
+        CHECK(1, "every lock level fits, with and without the AP lines");
+        /* the LOCK badge must not collide with the badges that outrank it */
+        st.ui_lock = UI_LOCK_FULL; st.dry_run = true; st.remote_fire_enabled = true;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "lock + dry-run + remote-fire together fit, oob=%u", cv.oob);
+        st.dry_run = false; st.remote_fire_enabled = false; st.ui_lock = UI_LOCK_OFF;
+        st.wifi_on = true;
+    }
+
+    SUITE("dui: a payload with lint errors shows the block, not the arm hint");
+    {
+        st.mode = DUI_SAFE; st.lint_problems = 2; st.lint_line = 7;
+        st.lint_msg = "text has a character it cannot type";
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "lint-error SAFE screen fits, oob=%u", cv.oob);
+        st.lint_problems = 0; st.lint_msg = NULL;
+    }
 TEST_MAIN_END

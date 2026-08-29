@@ -14,8 +14,12 @@ void cv_pixel(canvas_t *cv, int x, int y, uint16_t color)
 
 void cv_clear(canvas_t *cv, uint16_t color)
 {
-    int n = cv->w * cv->h;
-    for (int i = 0; i < n; i++) cv->px[i] = color;
+    /* Fill one row, then replicate it: memcpy moves words, the scalar loop
+     * moved one 16-bit pixel per iteration over all 32,400 of them. */
+    uint16_t *px = cv->px;
+    for (int x = 0; x < cv->w; x++) px[x] = color;
+    for (int y = 1; y < cv->h; y++)
+        memcpy(px + (size_t)y * cv->w, px, (size_t)cv->w * sizeof(uint16_t));
 }
 
 void cv_hline(canvas_t *cv, int x, int y, int w, uint16_t color)
@@ -30,8 +34,24 @@ void cv_vline(canvas_t *cv, int x, int y, int h, uint16_t color)
 
 void cv_fill_rect(canvas_t *cv, int x, int y, int w, int h, uint16_t color)
 {
-    for (int j = 0; j < h; j++)
-        for (int i = 0; i < w; i++) cv_pixel(cv, x + i, y + j, color);
+    /* Clip once, then write whole rows. The previous version called cv_pixel
+     * per pixel, paying a call + four bounds compares for every one - and text
+     * rendering fills a rect per glyph pixel, so this is the hottest path in
+     * the UI. Out-of-bounds pixels are still COUNTED (not silently dropped) so
+     * the oob guard the UI tests rely on keeps the exact same meaning. */
+    if (w <= 0 || h <= 0) return;
+    int x0 = x < 0 ? 0 : x,           y0 = y < 0 ? 0 : y;
+    int x1 = x + w > cv->w ? cv->w : x + w;
+    int y1 = y + h > cv->h ? cv->h : y + h;
+    long total = (long)w * h, drawn = 0;
+    if (x1 > x0 && y1 > y0) {
+        drawn = (long)(x1 - x0) * (y1 - y0);
+        for (int j = y0; j < y1; j++) {
+            uint16_t *row = cv->px + (size_t)j * cv->w + x0;
+            for (int i = x0; i < x1; i++) *row++ = color;
+        }
+    }
+    cv->oob += (uint32_t)(total - drawn);
 }
 
 void cv_rect(canvas_t *cv, int x, int y, int w, int h, uint16_t color)
@@ -88,8 +108,11 @@ int cv_char(canvas_t *cv, int x, int y, char c, uint16_t fg, int32_t bg, int sca
         uint8_t bits = g[row];
         for (int col = 0; col < FONT5X8_W; col++) {
             bool on = bits & (0x80 >> col);
-            if (on) cv_fill_rect(cv, x + col * scale, y + row * scale, scale, scale, fg);
-            else if (bg >= 0) cv_fill_rect(cv, x + col * scale, y + row * scale, scale, scale, (uint16_t)bg);
+            if (scale == 1) {                       /* the common case */
+                if (on)           cv_pixel(cv, x + col, y + row, fg);
+                else if (bg >= 0) cv_pixel(cv, x + col, y + row, (uint16_t)bg);
+            } else if (on)        cv_fill_rect(cv, x + col * scale, y + row * scale, scale, scale, fg);
+            else if (bg >= 0)     cv_fill_rect(cv, x + col * scale, y + row * scale, scale, scale, (uint16_t)bg);
         }
     }
     return x + (FONT5X8_W + 1) * scale;

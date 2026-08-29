@@ -92,12 +92,39 @@ const char *layout_name(kb_layout_t l)
     }
 }
 
+/* Active-layout override cache.
+ *
+ * The override tables are small but were scanned linearly for EVERY character
+ * of every STRING (AZERTY has 20 entries, so ~10 comparisons per char on top of
+ * the US lookup). Since a payload never changes layout mid-run, the table is
+ * expanded once into a direct index and reused. Overrides carry real modifier
+ * bytes (AltGr, not just Shift), so key and mods are cached separately rather
+ * than packed.
+ */
+static kb_layout_t s_cached = LAYOUT__COUNT;   /* LAYOUT__COUNT = not built yet */
+static uint8_t s_ovr_key[128], s_ovr_mods[128], s_ovr_has[128];
+
+static void layout_build_cache(kb_layout_t l)
+{
+    memset(s_ovr_has, 0, sizeof(s_ovr_has));
+    const ovr_t *t = TABLES[l].t;
+    for (int i = 0; i < TABLES[l].n; i++) {
+        uint8_t idx = (uint8_t)t[i].c;
+        if (idx < 128) { s_ovr_key[idx] = t[i].key; s_ovr_mods[idx] = t[i].mods; s_ovr_has[idx] = 1; }
+    }
+    s_cached = l;
+}
+
 bool hid_from_ascii_layout(char c, kb_layout_t layout, uint8_t *key, uint8_t *mods)
 {
-    if (layout > LAYOUT_US && layout < LAYOUT__COUNT) {
-        const ovr_t *t = TABLES[layout].t;
-        for (int i = 0; i < TABLES[layout].n; i++)
-            if (t[i].c == c) { if (key) *key = t[i].key; if (mods) *mods = t[i].mods; return true; }
+    uint8_t idx = (uint8_t)c;
+    if (idx < 128 && layout > LAYOUT_US && layout < LAYOUT__COUNT) {
+        if (layout != s_cached) layout_build_cache(layout);
+        if (s_ovr_has[idx]) {
+            if (key)  *key  = s_ovr_key[idx];
+            if (mods) *mods = s_ovr_mods[idx];
+            return true;
+        }
     }
-    return hid_from_ascii(c, key, mods);   /* US fallback */
+    return hid_from_ascii(c, key, mods);   /* US base */
 }

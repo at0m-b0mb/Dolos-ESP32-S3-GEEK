@@ -6,6 +6,11 @@
 
 void config_defaults(dolos_config_t *c)
 {
+    /* Zero everything first. The individual assignments below only set the
+     * first byte of each string, so without this the tail of every buffer is
+     * uninitialised stack - which the console can echo back and the logs can
+     * print. Cheap, and it makes the struct deterministic for tests. */
+    memset(c, 0, sizeof(*c));
     c->layout = LAYOUT_US;
     c->os = OS_WINDOWS;
     c->speed = SPEED_BALANCED;
@@ -14,7 +19,7 @@ void config_defaults(dolos_config_t *c)
     c->arm_pin[0] = 0;
     c->usb_vid = 0; c->usb_pid = 0;
     c->usb_mfr[0] = 0; c->usb_product[0] = 0;
-    c->wifi_on = false; c->wifi_ssid[0] = 0; c->wifi_pass[0] = 0;
+    c->wifi_on = true;    /* console on out of the box; credentials shown on the LCD */ c->wifi_ssid[0] = 0; c->wifi_pass[0] = 0;
     c->admin_user[0] = 0; c->admin_pass[0] = 0; c->remote_fire = false;
 }
 
@@ -37,6 +42,21 @@ static int ieq(const char *a, const char *b)
     return *a == *b;
 }
 static bool truthy(const char *v) { return ieq(v, "on") || ieq(v, "1") || ieq(v, "true") || ieq(v, "yes"); }
+
+ui_lock_t ui_lock_from_name(const char *v)
+{
+    if (!v) return UI_LOCK_OFF;
+    if (ieq(v, "full") || ieq(v, "all")) return UI_LOCK_FULL;
+    /* "on" keeps meaning what it meant before the levels existed */
+    if (ieq(v, "menu") || truthy(v))     return UI_LOCK_MENU;
+    return UI_LOCK_OFF;
+}
+
+const char *ui_lock_key(ui_lock_t l)
+{
+    switch (l) { case UI_LOCK_FULL: return "full"; case UI_LOCK_MENU: return "menu";
+                 default: return "off"; }
+}
 
 void config_parse(const char *text, dolos_config_t *c)
 {
@@ -80,6 +100,7 @@ void config_parse(const char *text, dolos_config_t *c)
         else if (ieq(key, "admin_user")) cfg_str(c->admin_user, sizeof(c->admin_user), val);
         else if (ieq(key, "admin_pass") || ieq(key, "admin_password")) cfg_str(c->admin_pass, sizeof(c->admin_pass), val);
         else if (ieq(key, "remote_fire")) c->remote_fire = truthy(val);
+        else if (ieq(key, "ui_lock") || ieq(key, "lock_ui")) c->ui_lock = ui_lock_from_name(val);
         else if (ieq(key, "armpin") || ieq(key, "pin")) {
             size_t i = 0;
             for (const char *q = val; *q && i < sizeof(c->arm_pin) - 1; q++)

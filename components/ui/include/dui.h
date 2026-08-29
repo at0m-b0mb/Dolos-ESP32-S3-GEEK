@@ -9,6 +9,7 @@
 #ifndef DOLOS_DUI_H
 #define DOLOS_DUI_H
 #include "canvas.h"
+#include "menu.h"   /* settings model drawn by the menu screen */
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,7 @@ typedef enum {
     DUI_ARMED,      /* one more hold fires; tap cancels           */
     DUI_COUNTDOWN,  /* 3-2-1 before it types; tap aborts          */
     DUI_RUNNING,    /* sending the payload; tap aborts            */
+    DUI_MENU,       /* settings menu: tap=next, hold=change       */
     DUI_DONE,       /* payload sent                               */
 } dui_mode_t;
 
@@ -41,8 +43,16 @@ typedef struct {
     uint8_t  leds;             /* host LED bitmap: exfil return channel */
     bool     wifi_on;          /* SoftAP + console running               */
     const char *wifi_ssid;     /* AP SSID (shown on SAFE)                */
-    const char *admin_pw;      /* first-run admin password (NULL to hide) */
+    const char *wifi_key;      /* AP passphrase to show on SAFE (NULL = hide) */
+    const char *admin_user;    /* console username                            */
+    const char *admin_pw;      /* console password (NULL to hide)             */
     bool     remote_fire_enabled; /* admin allowed remote fire -> banner  */
+    int      menu_sel;         /* highlighted settings row (DUI_MENU)     */
+    const dolos_config_t *cfg; /* live settings, shown in the menu        */
+    ui_lock_t ui_lock;         /* how much of the UI the button may reach */
+    int      lint_problems;    /* >0 = payload has errors, arming blocked */
+    int      lint_line;        /* line number of the first problem        */
+    const char *lint_msg;      /* short description of it                 */
     uint16_t anim;
 } dui_state_t;
 

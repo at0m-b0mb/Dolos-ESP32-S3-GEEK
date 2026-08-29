@@ -44,7 +44,9 @@ The GEEK's USB-A plug goes straight into a host, and the ESP32-S3 has native USB
 | **Flash-mode escape hatch** | Hold BOOT while plugging in → USB-HID never starts (stays serial, safe to re-flash) |
 | **Remote management** | Optional WPA2 web console with RBAC — admin-gated remote fire, never covert |
 | **International** | 10 keyboard layouts + Unicode “type anything” (Win/Linux/macOS) |
-| **Tested** | Pure-C engines with **131 host unit checks**; UI verified never to draw off-panel |
+| **On-device settings** | One-button menu (tap / hold / double-tap) — no touchscreen needed |
+| **Payload linter** | Broken payloads are caught at load and **cannot be armed** |
+| **Tested** | Pure-C engines with **225 host unit checks**, incl. a sanitized fuzz suite |
 
 <p align="center">
   <img src="docs/img/dui_safe.png" width="49%" alt="SAFE screen">
@@ -96,9 +98,45 @@ UNICODE 1F600                 REM  or a raw codepoint (U+1F600)
 
 > Windows needs `EnableHexNumpad` set once; macOS needs the "Unicode Hex Input" source; Linux (IBus/GTK) works out of the box. Layouts beyond US are best-effort — verify against your target.
 
+## 🎛 On-device settings (one button, no touchscreen)
+
+The GEEK's screen is **not** a touchscreen — one 1.14″ LCD and one BOOT button. So the whole settings UI runs on three gestures:
+
+| Gesture | On the SAFE screen | In the settings menu |
+|---|---|---|
+| **TAP** | next payload | next item |
+| **HOLD** | arm | change this setting |
+| **DOUBLE-TAP** | open settings | close settings |
+
+Change **layout · target OS · speed · dry-run · WiFi console · remote-fire**, then **SAVE TO CARD** writes it all back to `DOLOS.CFG`. Everything except WiFi applies immediately.
+
+### 🔒 Locking the UI
+
+Leaving the device somewhere nobody should be tinkering with it? `ui_lock` is a **level**, not a switch:
+
+| `ui_lock=` | Settings menu | Payload switching | Arming / firing / console |
+|---|---|---|---|
+| `off` *(default)* | ✅ | ✅ | ✅ |
+| `on` / `menu` | 🔒 | ✅ | ✅ |
+| `full` | 🔒 | 🔒 | ✅ |
+
+At `full` the device does exactly the one job it was configured for. The screen shows a **`LOCK`** badge and says `SETTINGS LOCKED`, so a locked device reads as locked rather than broken — and the lock is **not** a menu item, because a lock you can switch off from the screen it locks isn't a lock.
+
+## 🧪 Payload linter — it won't fire a broken payload
+
+Every payload is parse-checked when it loads. Unknown commands, bad `DELAY`/`UNICODE` arguments, a leading `REPEAT`, over-long lines, and characters that can't be typed on your selected layout/OS are all caught. If a payload has errors the LCD shows the failing line and **`ARMING BLOCKED`** — because typing garbage into someone else's machine isn't a recoverable mistake.
+
 ## 📡 Wireless console (v0.3)
 
-Set `wifi=ap` in `DOLOS.CFG` and Dolos raises a **WPA2 SoftAP** with a secure web console at `http://192.168.4.1` — the LCD shows the SSID and, on first run, a random admin password.
+**The console is on by default.** Dolos raises a **WPA2 SoftAP** with a secure web console at `http://192.168.4.1`, and the SAFE screen shows everything you need to get in:
+
+```
+AP  Dolos-4F2A
+KEY K7QM4XR2TB          <- WPA2 passphrase
+admin / P4XK9WDT        <- console login
+```
+
+Those are **generated on this device at first boot** and kept in NVS — there is deliberately **no shipped default credential**, because every unit flashing this firmware would share it. The screen exists so the device can show you a unique one. Pin your own in `DOLOS.CFG` if you prefer, or `wifi=off` to disable the radio.
 
 - **Manage remotely** — browse / **view / edit / upload** payloads, edit config, read the audit log, all from the browser (like pico-ducky, but access-controlled).
 - **Secure by construction** — **RBAC** (viewer / operator / admin), **PBKDF2-HMAC-SHA256** salted credentials, opaque **session cookies** (`HttpOnly; SameSite=Strict`), **CSRF** tokens on every write, failed-login **lockout**, constant-time comparisons. Traffic rides the **WPA2-encrypted** link.
@@ -123,24 +161,26 @@ Because Dolos becomes a **keyboard** after boot, its serial port disappears. To 
 ## 🧠 Architecture
 
 ```
-components/ducky/      DuckyScript engine, HID keymap, 10 layouts,
-                       Unicode "type anything", config parser   (host-tested)
+components/ducky/      DuckyScript engine, HID keymap, 10 layouts, Unicode
+                       "type anything", linter, settings model  (host-tested)
 components/dconsole/   Console security core: RBAC, PBKDF2 creds,
                        sessions, CSRF, lockout                  (host-tested)
-components/ui/         Canvas + 5×8 font + mission-control UI    (host-tested)
+components/ui/         Canvas, font, mission-control + settings UI,
+                       one-button gesture recognizer            (host-tested)
 main/usb_hid.c         TinyUSB HID keyboard+mouse+consumer device
 main/payload.c         SD payload loader + player (honors abort)
 main/dolos_main.c      Safety state machine + BOOT control + console bridge
 main/console_server.c  HTTP console endpoints (+ embedded console.html)
 main/net_wifi.c        WPA2 SoftAP
 main/display.c         ST7789 1.14" LCD driver
-test/host/             131 unit checks — `make -C test/host`
+test/host/             225 unit checks — `make -C test/host`
 ```
 
 The engine has **zero hardware dependencies**, so the whole keymap + parser is exercised on a laptop before it ever drives a real keyboard:
 
 ```bash
-make -C test/host   # keymap 20 · ducky 27 · ui 7 · layout 12 · config 11 · auth 29 · unicode 25
+make -C test/host   # 11 suites: keymap ducky ui layout config auth unicode lint fuzz menu button
+                    # the fuzz suite runs under ASan+UBSan (~12,500 malformed inputs)
 ```
 
 ## 🏢 Enterprise features — all shipped
@@ -161,6 +201,9 @@ Everything on the original roadmap is implemented, host-tested, and released:
 | 🆔 **Configurable USB identity** | ✅ v0.2 | `usb_vid` / `usb_pid` / `usb_mfr` / `usb_product` |
 | 📡 **Secure wireless console** — RBAC, PBKDF2, CSRF | ✅ v0.3 | `wifi=ap` — see [above](#-wireless-console-v03) |
 | 🌐 **Unicode "type anything"** | ✅ v0.4 | `STRING café 日本語`, `UNICODE <hex>` |
+| 🎛 **On-device settings menu** | ✅ v0.5 | Double-tap BOOT; `ui_lock=menu\|full` to lock |
+| 🧪 **Payload linter** | ✅ v0.5 | Automatic; blocks arming on a broken payload |
+| 🔑 **Per-device credentials** | ✅ v0.5 | Generated on first boot, shown on the LCD |
 
 **Next up:** per-device **HTTPS** for the console (transport is WPA2-only today) · Secure Boot v2 + flash encryption · payload encryption at rest.
 

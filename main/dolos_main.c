@@ -33,6 +33,11 @@
 #include "payload.h"
 #include "dconfig.h"
 #include "layout.h"
+#include "lint.h"
+#include "menu.h"
+#include "button.h"
+#include "nvs.h"
+#include "esp_random.h"
 #include "net_wifi.h"
 #include "console_server.h"
 #include "console_bridge.h"
@@ -55,6 +60,9 @@ static char  s_payload_buf[6144];
 static const char *s_payload;
 static const char *s_payload_name = "demo";
 static int   s_total_lines, s_cur_line, s_last_lines;
+/* Payload validation: a payload with errors cannot be armed (see lint.h). */
+static int          s_lint_problems;
+static ducky_lint_t s_lint_first;
 static volatile bool s_abort, s_run_done;
 static uint32_t s_run_count;
 
@@ -129,6 +137,11 @@ static void load_selected(void)
         s_payload_name = "demo";
     }
     s_total_lines = payload_count_lines(s_payload);
+    memset(&s_lint_first, 0, sizeof(s_lint_first));
+    s_lint_problems = ducky_lint(s_payload, s_cfg.layout, s_cfg.os, &s_lint_first, 1);
+    if (s_lint_problems > 0)
+        ESP_LOGW(TAG, "payload '%s' has %d problem(s); first at line %d: %s (arming blocked)",
+                 s_payload_name, s_lint_problems, s_lint_first.line, s_lint_first.msg);
 }
 
 /* ---- audit log ---- */
@@ -144,16 +157,40 @@ static void audit_write(bool aborted)
     fclose(fp);
 }
 
-/* ---- button ---- */
-typedef enum { BTN_NONE = 0, BTN_TAP, BTN_HOLD } btn_evt_t;
+/* ---- button: gestures come from the host-tested recognizer in button.h ---- */
+#define DOUBLE_MS 320u
+static btn_state_t s_btn;
 static btn_evt_t button_event(void)
 {
-    static bool down = false; static uint32_t t0 = 0; static bool hold_fired = false;
-    bool pressed = gpio_get_level(BOARD_BTN_PIN) == 0;
-    if (pressed && !down)  { down = true; t0 = now_ms(); hold_fired = false; }
-    else if (pressed && down && !hold_fired && now_ms() - t0 >= HOLD_MS) { hold_fired = true; return BTN_HOLD; }
-    else if (!pressed && down) { down = false; if (!hold_fired) return BTN_TAP; }
-    return BTN_NONE;
+    return button_feed(&s_btn, gpio_get_level(BOARD_BTN_PIN) == 0, now_ms());
+}
+
+/* ---- settings menu state ---- */
+static int  s_menu_sel;
+static bool s_cfg_dirty;          /* changed but not yet written to the card */
+
+/* Write the live settings back to /sdcard/DOLOS.CFG. */
+static bool config_save(void)
+{
+    if (!s_sd_ok) return false;
+    char text[768];
+    size_t n = config_write_text(&s_cfg, text, sizeof(text));
+    if (n == 0) return false;
+    FILE *fp = fopen("/sdcard/DOLOS.CFG", "w");
+    if (!fp) return false;
+    size_t w = fwrite(text, 1, n, fp);
+    fclose(fp);
+    if (w != n) return false;
+    ESP_LOGI(TAG, "settings saved to /sdcard/DOLOS.CFG");
+    return true;
+}
+
+/* Apply the settings that can take effect without a restart. */
+static void config_apply_live(void)
+{
+    usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
+    g_remote_fire_enabled = s_cfg.remote_fire;
+    load_selected();          /* re-lint: layout/OS changes can fix or break a payload */
 }
 
 /* ---- playback task ---- */
@@ -188,11 +225,13 @@ void bridge_status_json(char *buf, size_t cap)
     lock();
     snprintf(buf, cap,
         "{\"mode\":\"%s\",\"payload\":\"%s\",\"idx\":%d,\"count\":%d,\"layout\":\"%s\","
-        "\"speed\":\"%s\",\"dry\":%s,\"usb\":%s,\"leds\":%d,\"remote_fire\":%s,\"lines\":%d,\"cur\":%d}",
+        "\"speed\":\"%s\",\"dry\":%s,\"usb\":%s,\"leds\":%d,\"remote_fire\":%s,\"lines\":%d,\"cur\":%d,"
+        "\"lint\":%d,\"lint_line\":%d,\"lint_msg\":\"%s\"}",
         mode_str(s_mode), s_payload_name, s_sel + 1, s_npayloads > 0 ? s_npayloads : 1,
         layout_name(s_cfg.layout), speed_name(s_cfg.speed), s_cfg.dry_run ? "true" : "false",
         (!s_flash_mode && usb_hid_mounted()) ? "true" : "false", s_flash_mode ? 0 : usb_hid_leds(),
-        g_remote_fire_enabled ? "true" : "false", s_total_lines, s_cur_line);
+        g_remote_fire_enabled ? "true" : "false", s_total_lines, s_cur_line,
+        s_lint_problems, s_lint_first.line, s_lint_first.msg);
     unlock();
 }
 int bridge_list_payloads(char *out, size_t cap)
@@ -287,7 +326,7 @@ void bridge_set_remote_fire_enabled(bool on)
 bool bridge_remote_arm(void)
 {
     if (!g_remote_fire_enabled) return false;
-    lock(); bool ok = (s_mode == DUI_SAFE); if (ok) g_remote_req = 1; unlock();
+    lock(); bool ok = (s_mode == DUI_SAFE && s_lint_problems == 0); if (ok) g_remote_req = 1; unlock();
     return ok;
 }
 void bridge_remote_abort(void) { lock(); g_remote_req = 2; unlock(); }
@@ -312,12 +351,32 @@ static void ui_task(void *arg)
         if (s_lock && xSemaphoreTake(s_lock, 0) == pdTRUE) { rq = g_remote_req; g_remote_req = 0; xSemaphoreGive(s_lock); }
         if (rq == 2) { if (s_mode == DUI_RUNNING) s_abort = true;
                        else if (s_mode != DUI_SAFE && s_mode != DUI_DONE) s_mode = DUI_SAFE; }
-        else if (rq == 1 && s_mode == DUI_SAFE && g_remote_fire_enabled) { s_mode = DUI_COUNTDOWN; stage_ms = t; }
+        else if (rq == 1 && s_mode == DUI_SAFE && g_remote_fire_enabled && s_lint_problems == 0) { s_mode = DUI_COUNTDOWN; stage_ms = t; }
 
         switch (s_mode) {
+        case DUI_MENU: {
+            if (e == BTN_TAP) { s_menu_sel = (s_menu_sel + 1) % MENU__COUNT; }
+            else if (e == BTN_DOUBLE) { s_mode = DUI_SAFE; stage_ms = t; }
+            else if (e == BTN_HOLD) {
+                menu_action_t a = menu_activate(&s_cfg, (menu_item_t)s_menu_sel);
+                if (a == MENU_ACT_SAVE)      { config_save(); s_cfg_dirty = false; }
+                else if (a == MENU_ACT_EXIT) { s_mode = DUI_SAFE; stage_ms = t; }
+                else                         { s_cfg_dirty = true; config_apply_live(); }
+            }
+            break;
+        }
         case DUI_SAFE:
-            if (e == BTN_TAP && s_npayloads > 1) { s_sel = (s_sel + 1) % s_npayloads; load_selected(); }
-            else if (e == BTN_HOLD && !s_flash_mode) {
+            /* ui_lock is a level: MENU hides the settings screen, FULL also
+             * stops the payload being switched, so a device left in the field
+             * does exactly the one job it was configured for. Neither level
+             * touches arming, firing or the console. */
+            if (e == BTN_DOUBLE && s_cfg.ui_lock == UI_LOCK_OFF && !s_flash_mode) {
+                s_mode = DUI_MENU; s_menu_sel = 0; stage_ms = t;
+            }
+            else if (e == BTN_TAP && s_npayloads > 1 && s_cfg.ui_lock < UI_LOCK_FULL) {
+                s_sel = (s_sel + 1) % s_npayloads; load_selected();
+            }
+            else if (e == BTN_HOLD && !s_flash_mode && s_lint_problems == 0) {
                 if (s_cfg.arm_pin[0]) { s_mode = DUI_PINENTRY; s_pin_pos = 0; s_pin_cur = 1; stage_ms = t; }
                 else                  { s_mode = DUI_ARMED; stage_ms = t; }
             }
@@ -375,7 +434,15 @@ static void ui_task(void *arg)
         st.wifi_on = g_wifi_up;
         st.wifi_ssid = g_wifi_up ? net_wifi_ssid() : NULL;
         st.remote_fire_enabled = g_remote_fire_enabled;
-        st.admin_pw = g_admin_pw_show[0] ? g_admin_pw_show : NULL;
+        st.menu_sel = s_menu_sel;
+        st.cfg = &s_cfg;
+        st.ui_lock = s_cfg.ui_lock;
+        st.wifi_key = g_wifi_up ? s_cfg.wifi_pass : NULL;
+        st.admin_user = s_cfg.admin_user[0] ? s_cfg.admin_user : "admin";
+        st.lint_problems = s_lint_problems;
+        st.lint_line = s_lint_first.line;
+        st.lint_msg = s_lint_first.msg[0] ? s_lint_first.msg : NULL;
+        st.admin_pw = g_wifi_up ? (g_admin_pw_show[0] ? g_admin_pw_show : s_cfg.admin_pass) : NULL;
         st.countdown = 3 - (int)((t - stage_ms) / 1000);
         if (st.countdown < 1) st.countdown = 1;
         st.anim++;
@@ -383,6 +450,49 @@ static void ui_task(void *arg)
         if (cv) { dui_render(cv, &st); display_flush(); }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+}
+
+/* Generate a readable random secret: no 0/O/1/I/l, because these are read off a
+ * 1.14" screen and typed into a phone. */
+static void gen_secret(char *out, size_t len)
+{
+    static const char AB[] = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+    for (size_t i = 0; i < len; i++) out[i] = AB[esp_random() % (sizeof(AB) - 1)];
+    out[len] = 0;
+}
+
+/* Give this device its own AP passphrase and admin password on first boot and
+ * remember them in NVS.
+ *
+ * There is deliberately NO shipped default credential: every unit that flashes
+ * this firmware would share it, and the whole point of having a screen is that
+ * the device can show you a unique secret instead. Anything set in DOLOS.CFG
+ * wins, so an operator can still pin their own. */
+static void ensure_credentials(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("dolos", NVS_READWRITE, &h) != ESP_OK) return;
+    bool dirty = false;
+    size_t len;
+
+    if (!s_cfg.wifi_pass[0]) {
+        len = sizeof(s_cfg.wifi_pass);
+        if (nvs_get_str(h, "wifi_pass", s_cfg.wifi_pass, &len) != ESP_OK) {
+            gen_secret(s_cfg.wifi_pass, 10);            /* >= 8 for WPA2 */
+            nvs_set_str(h, "wifi_pass", s_cfg.wifi_pass);
+            dirty = true;
+        }
+    }
+    if (!s_cfg.admin_pass[0]) {
+        len = sizeof(s_cfg.admin_pass);
+        if (nvs_get_str(h, "admin_pass", s_cfg.admin_pass, &len) != ESP_OK) {
+            gen_secret(s_cfg.admin_pass, 8);
+            nvs_set_str(h, "admin_pass", s_cfg.admin_pass);
+            dirty = true;
+        }
+    }
+    if (dirty) nvs_commit(h);
+    nvs_close(h);
 }
 
 void app_main(void)
@@ -396,6 +506,7 @@ void app_main(void)
                          .pull_up_en = GPIO_PULLUP_ENABLE };
     gpio_config(&io);
     s_flash_mode = (gpio_get_level(BOARD_BTN_PIN) == 0);
+    button_init(&s_btn, HOLD_MS, DOUBLE_MS);
 
     display_init();
 
@@ -419,6 +530,7 @@ void app_main(void)
      * MODE. Physical arming is unchanged; remote fire stays admin-gated + visible. */
     s_lock = xSemaphoreCreateMutex();
     g_remote_fire_enabled = s_cfg.remote_fire;
+    ensure_credentials();
     if (!s_flash_mode && s_cfg.wifi_on) {
         if (net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass) &&
             console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {

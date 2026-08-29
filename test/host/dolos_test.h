@@ -9,6 +9,12 @@ static int g_checks = 0, g_fails = 0;
     if (!(cond)) { g_fails++; \
         printf("  FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } \
 } while (0)
+/* Like CHECK, but only counted when it FAILS. For assertions inside big fuzz
+ * loops, where counting every iteration would drown the totals. */
+#define CHECK_QUIET(cond, ...) do { \
+    if (!(cond)) { g_checks++; g_fails++; \
+        printf("  FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } \
+} while (0)
 #define SUITE(name) printf("== %s ==\n", name)
 #define TEST_MAIN_BEGIN int main(void) {
 #define TEST_MAIN_END \
