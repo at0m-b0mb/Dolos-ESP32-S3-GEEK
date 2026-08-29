@@ -18,6 +18,17 @@
 #include "layout.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
+
+/* Is this buffer NUL-terminated somewhere inside itself? That is the invariant
+ * every parsed string must hold, so strlen can never run off the end.
+ * Hand-rolled because strnlen() is POSIX, not ISO C: glibc hides it under
+ * -std=c11, which broke the Linux CI build while macOS compiled it fine. */
+static bool term_in_bounds(const char *s, size_t cap)
+{
+    for (size_t i = 0; i < cap; i++) if (s[i] == 0) return true;
+    return false;
+}
 
 /* deterministic PRNG so a failure is reproducible */
 static uint32_t rs = 0xC0FFEE;
@@ -53,15 +64,15 @@ TEST_MAIN_BEGIN
             CHECK_QUIET(c.os <= OS_MAC, "os stayed in range");
             /* the invariant that matters: every string is terminated INSIDE
              * its buffer, so strlen and friends can never run off the end */
-            CHECK_QUIET(strnlen(c.arm_pin, sizeof(c.arm_pin)) < sizeof(c.arm_pin),
+            CHECK_QUIET(term_in_bounds(c.arm_pin, sizeof(c.arm_pin)),
                         "arm_pin terminated in bounds");
-            CHECK_QUIET(strnlen(c.wifi_ssid, sizeof(c.wifi_ssid)) < sizeof(c.wifi_ssid),
+            CHECK_QUIET(term_in_bounds(c.wifi_ssid, sizeof(c.wifi_ssid)),
                         "ssid terminated in bounds");
-            CHECK_QUIET(strnlen(c.wifi_pass, sizeof(c.wifi_pass)) < sizeof(c.wifi_pass),
+            CHECK_QUIET(term_in_bounds(c.wifi_pass, sizeof(c.wifi_pass)),
                         "pass terminated in bounds");
-            CHECK_QUIET(strnlen(c.admin_user, sizeof(c.admin_user)) < sizeof(c.admin_user),
+            CHECK_QUIET(term_in_bounds(c.admin_user, sizeof(c.admin_user)),
                         "admin_user terminated in bounds");
-            CHECK_QUIET(strnlen(c.usb_product, sizeof(c.usb_product)) < sizeof(c.usb_product),
+            CHECK_QUIET(term_in_bounds(c.usb_product, sizeof(c.usb_product)),
                         "usb_product terminated in bounds");
         }
         CHECK(1, "3000 random configs parsed without a crash");
