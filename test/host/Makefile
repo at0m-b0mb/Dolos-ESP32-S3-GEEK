@@ -43,9 +43,9 @@ clean:
 # --- UI suite + mockups ---
 UI := ../../components/ui/src
 UIINC := -I../../components/ui/include
-$(BIN)/test_dui: test_dui.c $(UI)/dui.c $(UI)/canvas.c $(UI)/font5x8.c $(DUCKY)/menu.c $(DUCKY)/dconfig.c $(DSRC) | $(BIN)
+$(BIN)/test_dui: test_dui.c $(UI)/dui.c $(UI)/canvas.c $(UI)/font5x8.c $(UI)/qrcodegen.c $(DUCKY)/menu.c $(DUCKY)/dconfig.c $(DSRC) | $(BIN)
 	$(CC) $(CFLAGS) $(UIINC) $^ -o $@
-$(BIN)/render_mockup: render_mockup.c $(UI)/dui.c $(UI)/canvas.c $(UI)/font5x8.c $(DUCKY)/menu.c $(DUCKY)/dconfig.c $(DSRC) | $(BIN)
+$(BIN)/render_mockup: render_mockup.c $(UI)/dui.c $(UI)/canvas.c $(UI)/font5x8.c $(UI)/qrcodegen.c $(DUCKY)/menu.c $(DUCKY)/dconfig.c $(DSRC) | $(BIN)
 	$(CC) $(CFLAGS) $(UIINC) $^ -o $@
 .PHONY: ui mockups
 ui: run-test_dui

@@ -66,7 +66,7 @@ Dolos is engineered so it will **not** fire by accident and **cannot** fire cove
 2. **Two-stage arming.** `SAFE ──hold BOOT──▶ ARMED ──hold BOOT──▶ 3·2·1 countdown ──▶ RUNNING`. A **tap aborts** at any stage, and **ARMED times out** back to SAFE on its own.
 3. **Flash mode.** Hold BOOT *while plugging in* and USB-HID never initializes — the device stays a plain serial port that can never type and is trivial to re-flash.
 4. **Readable payloads.** The payload is plain text on the SD card. No hidden embedded payload; with no card, a harmless demo that only types a banner runs.
-5. **Always-on reminder.** `LAB USE ONLY` never leaves the screen.
+5. **Always-on reminder.** `AUTHORIZED USE ONLY` never leaves the screen.
 
 ## ⌨️ DuckyScript reference
 
@@ -144,6 +144,18 @@ Those are **generated on this device at first boot** and kept in NVS — there i
 
 > Security *logic* is host-unit-tested; the on-device server + WiFi are compile-verified and pending hardware bring-up. Transport is WPA2 in v0.3; per-device HTTPS is next. See [`examples/DOLOS.CFG`](examples/DOLOS.CFG).
 
+## 🔄 Factory reset & 🔒 hardening
+
+**Factory reset** wipes the generated credentials and saved config, restarts, and mints fresh secrets (payloads are left alone). Two authorised routes: on the device via **Settings → FACTORY RESET**, or `POST /api/factory_reset` from an **admin** console session. This is the only reversal that exists — and it is on by default.
+
+**Hardening is opt-in and permanent.** On a stock ESP32-S3 everything is plaintext flash, so anyone holding the device can read your console credentials out with `esptool read_flash` — no reflashing needed. Flash encryption closes that; Secure Boot v2 stops attacker firmware running.
+
+```bash
+./tools/harden.sh plan     # explains everything, changes nothing
+```
+
+> ⚠️ **Secure Boot v2 cannot be disabled by anyone, with any password, ever.** eFuses are one-way. Harden a device you are deploying; never harden your development board. See [`docs/HARDENING.md`](docs/HARDENING.md).
+
 ## 🚀 Flash it
 
 **Easiest — browser flasher:** open **<https://at0m-b0mb.github.io/Dolos-ESP32-S3-GEEK/>** in Chrome/Edge, tick the authorization box, click *Install Dolos*, pick the port. Done.
@@ -204,6 +216,9 @@ Everything on the original roadmap is implemented, host-tested, and released:
 | 🎛 **On-device settings menu** | ✅ v0.5 | Double-tap BOOT; `ui_lock=menu\|full` to lock |
 | 🧪 **Payload linter** | ✅ v0.5 | Automatic; blocks arming on a broken payload |
 | 🔑 **Per-device credentials** | ✅ v0.5 | Generated on first boot, shown on the LCD |
+| 📱 **Console join QR** | ✅ v0.6 | Settings → CONSOLE INFO; scan to join the AP |
+| 🔄 **Factory reset** | ✅ v0.6 | Menu, or admin-only `POST /api/factory_reset` |
+| 🔒 **Flash encryption / Secure Boot** | ✅ v0.6 | Opt-in: `tools/harden.sh` |
 
 **Next up:** per-device **HTTPS** for the console (transport is WPA2-only today) · Secure Boot v2 + flash encryption · payload encryption at rest.
 

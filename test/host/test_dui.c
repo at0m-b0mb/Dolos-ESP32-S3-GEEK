@@ -89,4 +89,53 @@ TEST_MAIN_BEGIN
         CHECK(cv.oob == 0, "lint-error SAFE screen fits, oob=%u", cv.oob);
         st.lint_problems = 0; st.lint_msg = NULL;
     }
+
+    SUITE("dui: the standing AUTHORIZED USE ONLY tag fits beside the LED indicators");
+    {
+        /* The footer packs three things onto one 240 px row: layout/speed on the
+         * left, the Caps/Num/Scroll indicators in the middle, and the standing
+         * reminder right-aligned. Widening that reminder is exactly the change
+         * that would silently collide with the indicators, so the geometry is
+         * pinned here rather than eyeballed. */
+        const int led_right_edge = 96 + 16 + cv_text_width("S", 1);   /* last LED glyph */
+        const int tag_left = 240 - cv_text_width("AUTHORIZED USE ONLY", 1) - 3;
+        CHECK(tag_left > led_right_edge,
+              "tag starts at x=%d, LEDs end at x=%d - they must not overlap",
+              tag_left, led_right_edge);
+        CHECK(tag_left >= 0, "tag stays on the panel, x=%d", tag_left);
+
+        /* and it must render clean in the worst case: longest layout/speed on
+         * the left with every LED lit */
+        st.mode = DUI_SAFE; st.layout = "US"; st.speed = "BALANCED"; st.leds = 0x07;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "footer with all LEDs lit fits, oob=%u", cv.oob);
+        st.leds = 0;
+    }
+
+    SUITE("dui: the console screen fits, with a QR and full-length credentials");
+    {
+        dolos_config_t cfg2; config_defaults(&cfg2); cfg2.wifi_on = true;
+        st.mode = DUI_INFO; st.cfg = &cfg2; st.wifi_on = true;
+        st.wifi_ssid = "Dolos-4F2A"; st.wifi_key = "K7QM4XR2TB";
+        st.admin_user = "admin"; st.admin_pw = "P4XK9WDT";
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "console screen with QR fits the panel, oob=%u", cv.oob);
+
+        /* longest realistic strings: a 31-char SSID and full-width secrets */
+        st.wifi_ssid = "Dolos-AAAAAAAAAAAAAAAAAAAAAAAAA";
+        st.wifi_key  = "ABCDEFGHIJKLMNOPQRST";
+        st.admin_user = "administrator"; st.admin_pw = "ABCDEFGHIJKL";
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "console screen with maximal strings fits, oob=%u", cv.oob);
+
+        /* radio off: the screen must explain itself, not show a blank QR */
+        st.wifi_on = false; cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "console screen with the radio off fits, oob=%u", cv.oob);
+
+        /* missing strings must not crash the QR encoder */
+        st.wifi_on = true; st.wifi_ssid = NULL; st.wifi_key = NULL;
+        st.admin_user = NULL; st.admin_pw = NULL;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "console screen with no credentials still renders, oob=%u", cv.oob);
+    }
 TEST_MAIN_END

@@ -1,0 +1,4 @@
+qrcodegen.c / qrcodegen.h are the QR Code generator library by Project Nayuki,
+used unmodified under the MIT License:
+  https://www.nayuki.io/page/qr-code-generator-library
+The full copyright and permission notice is retained at the top of both files.

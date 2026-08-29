@@ -13,3 +13,7 @@ test/host/bin/
 *.o
 *.log
 test/host/out/
+
+# hardening: never commit the Secure Boot signing key
+secure_boot_signing_key.pem
+sdkconfig.hardening

@@ -147,6 +147,16 @@ h1{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;margin
         <label>DOLOS.CFG (secrets redacted)</label>
         <textarea id="cfg" spellcheck="false"></textarea>
         <div class="row" style="margin-top:10px"><button class="ghost" id="cfgSave">Save config</button></div>
+        <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--rim)">
+          <label>Danger zone</label>
+          <div style="color:var(--dim);font-size:.84rem;margin-bottom:8px">
+            Wipes the console credentials and saved settings, then restarts and
+            generates new ones. Payloads on the card are left alone. This is the
+            only reset that exists &mdash; flash encryption and Secure Boot cannot
+            be undone by any password.
+          </div>
+          <button class="warn" id="factoryBtn">Factory reset</button>
+        </div>
       </div>
 
       <div id="tab-audit" class="hidden">
@@ -227,6 +237,13 @@ $("#saveBtn").onclick=async()=>{
 // config + audit
 async function loadConfig(){const r=await api("/api/config");if(r.ok)$("#cfg").value=await r.text();}
 $("#cfgSave").onclick=async()=>{const r=await api("/api/config",{method:"POST",body:$("#cfg").value});toast(r.ok?"Config saved":"Save failed");};
+$("#factoryBtn").onclick=async()=>{
+  if(!confirm("Factory reset?\n\nThe Wi-Fi key and admin password will be replaced. "+
+              "You will be disconnected and must rejoin using the new credentials "+
+              "shown on the device screen (Settings > Console info)."))return;
+  const r=await api("/api/factory_reset",{method:"POST"});
+  toast(r.ok?"Reset - device restarting":"Reset refused");
+};
 async function loadAudit(){const r=await api("/api/audit");$("#auditLog").textContent=r.ok?(await r.text()||"—"):"—";}
 $("#auditRefresh").onclick=loadAudit;
 

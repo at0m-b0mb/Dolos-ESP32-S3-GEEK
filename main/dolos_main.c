@@ -38,6 +38,8 @@
 #include "button.h"
 #include "nvs.h"
 #include "esp_random.h"
+#include "bootloader_random.h"
+#include "esp_system.h"
 #include "net_wifi.h"
 #include "console_server.h"
 #include "console_bridge.h"
@@ -75,6 +77,11 @@ static SemaphoreHandle_t s_lock;
 static volatile bool     g_remote_fire_enabled;
 static volatile int      g_remote_req;      /* 0 none, 1 arm, 2 abort */
 static bool              g_wifi_up;
+/* Boot-loop guard: if the last boot crashed, come up minimal rather than
+ * repeating the crash forever. A device that bricks itself on a bad setting is
+ * worse than one that boots without its radio and says so. */
+static bool              g_safe_boot;
+static uint32_t          g_boot_ms;
 static char              g_admin_pw_show[20];
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -331,6 +338,8 @@ bool bridge_remote_arm(void)
 }
 void bridge_remote_abort(void) { lock(); g_remote_req = 2; unlock(); }
 
+static void boot_guard_ok(void);   /* defined with the guard, below */
+
 static void ui_task(void *arg)
 {
     (void)arg;
@@ -361,10 +370,32 @@ static void ui_task(void *arg)
                 menu_action_t a = menu_activate(&s_cfg, (menu_item_t)s_menu_sel);
                 if (a == MENU_ACT_SAVE)      { config_save(); s_cfg_dirty = false; }
                 else if (a == MENU_ACT_EXIT) { s_mode = DUI_SAFE; stage_ms = t; }
+                else if (a == MENU_ACT_CONSOLE_INFO) { s_mode = DUI_INFO; stage_ms = t; }
+                else if (a == MENU_ACT_FACTORY) { dolos_factory_reset(); }
+                else if (a == MENU_ACT_NEW_CREDS) {
+                    /* Throw the stored secrets away and restart: the AP key is
+                     * baked into the running radio, so the only honest way to
+                     * apply a new one is to come up again with it. The new
+                     * credentials are on the CONSOLE INFO screen after reboot. */
+                    nvs_handle_t nh;
+                    if (nvs_open("dolos", NVS_READWRITE, &nh) == ESP_OK) {
+                        nvs_erase_key(nh, "wifi_pass");
+                        nvs_erase_key(nh, "admin_pass");
+                        nvs_commit(nh);
+                        nvs_close(nh);
+                    }
+                    ESP_LOGW(TAG, "console credentials cleared - restarting to mint new ones");
+                    esp_restart();
+                }
                 else                         { s_cfg_dirty = true; config_apply_live(); }
             }
             break;
         }
+        case DUI_INFO:
+            /* Any deliberate press goes back to the menu, so the credentials
+             * are not left on display indefinitely by accident. */
+            if (e != BTN_NONE) { s_mode = DUI_MENU; stage_ms = t; }
+            break;
         case DUI_SAFE:
             /* ui_lock is a level: MENU hides the settings screen, FULL also
              * stops the payload being switched, so a device left in the field
@@ -434,9 +465,14 @@ static void ui_task(void *arg)
         st.wifi_on = g_wifi_up;
         st.wifi_ssid = g_wifi_up ? net_wifi_ssid() : NULL;
         st.remote_fire_enabled = g_remote_fire_enabled;
+        /* Ran long enough without crashing: clear the boot-loop counter. */
+        static bool cleared = false;
+        if (!cleared && (t - g_boot_ms) > 15000u) { cleared = true; boot_guard_ok(); }
+
         st.menu_sel = s_menu_sel;
         st.cfg = &s_cfg;
         st.ui_lock = s_cfg.ui_lock;
+        st.safe_boot = g_safe_boot;
         st.wifi_key = g_wifi_up ? s_cfg.wifi_pass : NULL;
         st.admin_user = s_cfg.admin_user[0] ? s_cfg.admin_user : "admin";
         st.lint_problems = s_lint_problems;
@@ -450,6 +486,64 @@ static void ui_task(void *arg)
         if (cv) { dui_render(cv, &st); display_flush(); }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+}
+
+/* Decide whether this boot should be a reduced "safe boot".
+ *
+ * A crash reboots the ESP32, and if the cause is deterministic (a bad config, a
+ * radio that cannot allocate) the device simply crashes again - a boot loop the
+ * operator cannot break out of, because every setting lives on an SD card the
+ * device may not even have. So a crash is counted in NVS, and after two in a
+ * row the next boot skips the optional subsystems and says SAFE BOOT on screen.
+ * A successful run clears the count (see boot_guard_ok). */
+static void boot_guard_begin(void)
+{
+    esp_reset_reason_t r = esp_reset_reason();
+    bool crashed = (r == ESP_RST_PANIC || r == ESP_RST_TASK_WDT ||
+                    r == ESP_RST_INT_WDT || r == ESP_RST_WDT);
+    uint8_t count = 0;
+    nvs_handle_t h;
+    if (nvs_open("dolos", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_get_u8(h, "crashes", &count);          /* absent -> stays 0 */
+        count = crashed ? (uint8_t)(count + 1) : 0;
+        nvs_set_u8(h, "crashes", count);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    g_safe_boot = (count >= 2);
+    ESP_LOGW(TAG, "reset reason=%d crashed=%d consecutive=%u -> %s",
+             (int)r, (int)crashed, count, g_safe_boot ? "SAFE BOOT" : "normal boot");
+}
+
+/* Called once the device has run long enough to call this boot a success. */
+static void boot_guard_ok(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("dolos", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "crashes", 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+/* Wipe this device back to a clean state: generated console secrets and the
+ * saved configuration, then restart so fresh secrets are minted.
+ *
+ * This is the ONLY reversal Dolos can honestly offer. Flash encryption and
+ * Secure Boot are eFuse-based and cannot be undone by any password - see
+ * docs/HARDENING.md. What an authorised person CAN do is return the device to
+ * factory state, which is what this does. */
+void dolos_factory_reset(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("dolos", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_erase_all(h);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    if (s_sd_ok) remove("/sdcard/DOLOS.CFG");     /* payloads are left alone */
+    ESP_LOGW(TAG, "FACTORY RESET - restarting with fresh credentials");
+    esp_restart();
 }
 
 /* Generate a readable random secret: no 0/O/1/I/l, because these are read off a
@@ -470,8 +564,19 @@ static void gen_secret(char *out, size_t len)
  * wins, so an operator can still pin their own. */
 static void ensure_credentials(void)
 {
+    /* Entropy first.
+     *
+     * esp_random() is only a TRUE random number generator while the RF
+     * subsystem (Wi-Fi or Bluetooth) is running - Espressif is explicit that
+     * without it the hardware RNG output is not truly random. Credentials are
+     * minted here, BEFORE the radio starts, which is precisely the weak window.
+     * bootloader_random_enable() switches on the SAR-ADC entropy source for the
+     * few microseconds this needs, and it is switched off again immediately -
+     * it must not still be running when Wi-Fi or the ADC driver start. */
+    bootloader_random_enable();
+
     nvs_handle_t h;
-    if (nvs_open("dolos", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open("dolos", NVS_READWRITE, &h) != ESP_OK) { bootloader_random_disable(); return; }
     bool dirty = false;
     size_t len;
 
@@ -493,6 +598,7 @@ static void ensure_credentials(void)
     }
     if (dirty) nvs_commit(h);
     nvs_close(h);
+    bootloader_random_disable();          /* before Wi-Fi/ADC touch the SAR */
 }
 
 void app_main(void)
@@ -507,6 +613,9 @@ void app_main(void)
     gpio_config(&io);
     s_flash_mode = (gpio_get_level(BOARD_BTN_PIN) == 0);
     button_init(&s_btn, HOLD_MS, DOUBLE_MS);
+
+    boot_guard_begin();
+    g_boot_ms = now_ms();
 
     display_init();
 
@@ -531,7 +640,7 @@ void app_main(void)
     s_lock = xSemaphoreCreateMutex();
     g_remote_fire_enabled = s_cfg.remote_fire;
     ensure_credentials();
-    if (!s_flash_mode && s_cfg.wifi_on) {
+    if (!s_flash_mode && s_cfg.wifi_on && !g_safe_boot) {
         if (net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass) &&
             console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {
             g_wifi_up = true;
@@ -544,5 +653,5 @@ void app_main(void)
              s_flash_mode ? "FLASH" : "HID", s_npayloads, layout_name(s_cfg.layout),
              speed_name(s_cfg.speed), s_cfg.dry_run, s_cfg.arm_pin[0] ? "set" : "off");
 
-    xTaskCreate(ui_task, "dolos_ui", 6144, NULL, 5, NULL);
+    xTaskCreate(ui_task, "dolos_ui", 8192, NULL, 5, NULL);
 }

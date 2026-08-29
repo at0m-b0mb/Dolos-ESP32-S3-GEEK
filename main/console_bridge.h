@@ -21,4 +21,5 @@ bool bridge_remote_fire_enabled(void);
 void bridge_set_remote_fire_enabled(bool on);   /* admin toggle (visible)  */
 bool bridge_remote_arm(void);                   /* start fire IF enabled   */
 void bridge_remote_abort(void);
+void dolos_factory_reset(void);   /* wipe secrets + config, then restart */
 #endif

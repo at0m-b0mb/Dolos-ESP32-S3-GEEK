@@ -15,6 +15,9 @@
 #define DU_FIRE    cv_rgb(240, 70, 70)
 #define DU_DONE    cv_rgb(90, 160, 255)
 
+/* Never leaves the screen. */
+#define WARN_TAG   "AUTHORIZED USE ONLY"
+
 static uint16_t mode_color(dui_mode_t m)
 {
     switch (m) {
@@ -23,7 +26,8 @@ static uint16_t mode_color(dui_mode_t m)
         case DUI_ARMED:     return DU_ARMED;
         case DUI_COUNTDOWN: return DU_FIRE;
         case DUI_RUNNING:   return DU_FIRE;
-        case DUI_MENU:      return DU_DONE;
+        case DUI_MENU:
+        case DUI_INFO:      return DU_DONE;
         default:            return DU_DONE;
     }
 }
@@ -36,6 +40,7 @@ static const char *mode_word(dui_mode_t m)
         case DUI_COUNTDOWN: return "FIRING";
         case DUI_RUNNING:   return "RUNNING";
         case DUI_MENU:      return "SETTINGS";
+        case DUI_INFO:      return "CONSOLE";
         default:            return "SENT";
     }
 }
@@ -87,7 +92,11 @@ static void draw_footer(canvas_t *cv, const dui_state_t *st)
     cv_text(cv, lx,      H - 10, "C", (st->leds & 0x02) ? DU_SAFE : cv_rgb(60,50,58), -1, 1);
     cv_text(cv, lx + 8,  H - 10, "N", (st->leds & 0x01) ? DU_SAFE : cv_rgb(60,50,58), -1, 1);
     cv_text(cv, lx + 16, H - 10, "S", (st->leds & 0x04) ? DU_SAFE : cv_rgb(60,50,58), -1, 1);
-    cv_text(cv, W - cv_text_width("LAB USE ONLY", 1) - 3, H - 10, "LAB USE ONLY", DU_ACCENT, -1, 1);
+    /* The standing reminder. "AUTHORIZED USE ONLY" rather than "lab": this ships
+     * into real engagements, where the thing that makes use legitimate is
+     * written authorization, not the room you are standing in. 19 chars = 114 px
+     * right-aligned at x=123, clearing the LED indicators that end at 118. */
+    cv_text(cv, W - cv_text_width(WARN_TAG, 1) - 3, H - 10, WARN_TAG, DU_ACCENT, -1, 1);
 }
 
 static void progress_bar(canvas_t *cv, int x, int y, int w, int h, int cur, int total, uint16_t c)
@@ -105,20 +114,112 @@ static void progress_bar(canvas_t *cv, int x, int y, int w, int h, int cur, int 
  * the highlighted row IS the cursor - there is no scrolling to get lost in. */
 static void draw_menu(canvas_t *cv, const dui_state_t *st)
 {
+    /* The list outgrew the panel once it passed eight entries, so it scrolls:
+     * a fixed window of rows follows the selection, with arrows showing that
+     * there is more above or below. The highlighted row is still the cursor. */
     const int y0 = 19, rh = 12;
-    for (int i = 0; i < MENU__COUNT; i++) {
-        int y = y0 + i * rh;
-        bool sel = (i == st->menu_sel);
+    const int visible = (H - 12 - y0) / rh;          /* rows that fit above the footer */
+    int first = st->menu_sel - visible / 2;
+    if (first > MENU__COUNT - visible) first = MENU__COUNT - visible;
+    if (first < 0) first = 0;
+
+    for (int row = 0; row < visible && (first + row) < MENU__COUNT; row++) {
+        int item = first + row;
+        int y = y0 + row * rh;
+        bool sel = (item == st->menu_sel);
         if (sel) cv_fill_rect(cv, 2, y - 1, W - 4, rh - 1, DU_ACCENT);
         uint16_t fg = sel ? DU_BG : DU_INK;
-        cv_text(cv, 6, y, menu_label((menu_item_t)i), fg, -1, 1);
+        cv_text(cv, 6, y, menu_label((menu_item_t)item), fg, -1, 1);
         if (st->cfg) {
             char v[24];
-            menu_value(st->cfg, (menu_item_t)i, v, sizeof(v));
-            if (v[0]) cv_text(cv, W - cv_text_width(v, 1) - 6, y, v,
+            menu_value(st->cfg, (menu_item_t)item, v, sizeof(v));
+            if (v[0]) cv_text(cv, W - cv_text_width(v, 1) - 12, y, v,
                               sel ? DU_BG : DU_SAFE, -1, 1);
         }
     }
+    /* more-above / more-below markers, in the right margin */
+    if (first > 0)                        cv_text(cv, W - 8, y0, "^", DU_DIM, -1, 1);
+    if (first + visible < MENU__COUNT)    cv_text(cv, W - 8, y0 + (visible - 1) * rh, "v", DU_DIM, -1, 1);
+}
+
+/* Draw text clipped to `maxw` pixels: at scale 1, cutting off any tail that
+ * would not fit rather than letting it run past the edge. */
+static void draw_fit_scale1(canvas_t *cv, int x, int y, const char *s,
+                            uint16_t colour, int maxw)
+{
+    char buf[64];
+    int max_chars = maxw / 6;
+    if (max_chars <= 0) return;
+    if (max_chars > (int)sizeof(buf) - 1) max_chars = (int)sizeof(buf) - 1;
+    snprintf(buf, (size_t)max_chars + 1, "%s", s ? s : "-");
+    cv_text(cv, x, y, buf, colour, -1, 1);
+}
+
+/* Same, but preferring double size when the whole string fits at that size. */
+static void draw_fit(canvas_t *cv, int x, int y, const char *s,
+                     uint16_t colour, int maxw)
+{
+    const char *t = s ? s : "-";
+    if (cv_text_width(t, 2) <= maxw) { cv_text(cv, x, y, t, colour, -1, 2); return; }
+    draw_fit_scale1(cv, x, y, t, colour, maxw);
+}
+
+/* The console join screen.
+ *
+ * Reading a 10-character key off a 1.14" screen and typing it into a phone is
+ * miserable, so the credentials are encoded as a standard Wi-Fi QR (the same
+ * "WIFI:" URI Android and iOS cameras understand) and the text beside it is
+ * drawn at double size to be legible at arm's length. */
+static void draw_info(canvas_t *cv, const dui_state_t *st)
+{
+    if (!st->wifi_on) {
+        cv_text_center(cv, W / 2, 56, "WIFI CONSOLE IS OFF", DU_DIM, -1, 1);
+        cv_text_center(cv, W / 2, 74, "ENABLE IT IN SETTINGS", DU_DIM, -1, 1);
+        return;
+    }
+
+    /* WIFI:T:WPA;S:<ssid>;P:<key>;; - the join URI phone cameras recognise */
+    char uri[128];
+    snprintf(uri, sizeof(uri), "WIFI:T:WPA;S:%s;P:%s;;",
+             st->wifi_ssid ? st->wifi_ssid : "", st->wifi_key ? st->wifi_key : "");
+
+    static uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
+    static uint8_t tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
+    bool ok = qrcodegen_encodeText(uri, tmp, qr, qrcodegen_Ecc_LOW,
+                                   1, 6, qrcodegen_Mask_AUTO, true);
+    int qx = 6, qy = 20;
+    if (ok) {
+        int n = qrcodegen_getSize(qr);
+        int avail = H - 12 - qy - 2;               /* above the footer */
+        int scale = avail / (n + 2);               /* +2 = quiet zone  */
+        if (scale < 1) scale = 1;
+        int side = (n + 2) * scale;
+        /* A QR needs a light quiet zone to scan: draw the whole block white. */
+        cv_fill_rect(cv, qx, qy, side, side, cv_rgb(255, 255, 255));
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+                if (qrcodegen_getModule(qr, x, y))
+                    cv_fill_rect(cv, qx + (x + 1) * scale, qy + (y + 1) * scale,
+                                 scale, scale, cv_rgb(0, 0, 0));
+        qx += side + 6;
+    }
+
+    /* Credentials as large as they will go without spilling out of the column
+     * beside the QR. Draw them at double size when they fit, single otherwise,
+     * and clip to the column either way - a value that runs off the panel is
+     * worse than a small one, because you cannot tell it was truncated. */
+    int tx = qx, tw = W - tx - 4;
+    cv_text(cv, tx, 18, "NETWORK", DU_DIM, -1, 1);
+    draw_fit(cv, tx, 27, st->wifi_ssid ? st->wifi_ssid : "-", DU_SAFE, tw);
+    cv_text(cv, tx, 47, "KEY", DU_DIM, -1, 1);
+    draw_fit(cv, tx, 56, st->wifi_key ? st->wifi_key : "-", DU_INK, tw);
+    {
+        char who[40];
+        snprintf(who, sizeof(who), "LOGIN  %s", st->admin_user ? st->admin_user : "admin");
+        draw_fit_scale1(cv, tx, 76, who, DU_DIM, tw);
+    }
+    draw_fit(cv, tx, 85, st->admin_pw ? st->admin_pw : "-", DU_ARMED, tw);
+    draw_fit_scale1(cv, tx, 106, "http://192.168.4.1", DU_DIM, tw);
 }
 
 void dui_render(canvas_t *cv, const dui_state_t *st)
@@ -126,6 +227,12 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
     cv_clear(cv, DU_BG);
     if (st->mode == DUI_MENU) {          /* the list needs the whole screen */
         draw_menu(cv, st);
+        draw_header(cv, st);
+        draw_footer(cv, st);
+        return;
+    }
+    if (st->mode == DUI_INFO) {
+        draw_info(cv, st);
         draw_header(cv, st);
         draw_footer(cv, st);
         return;
@@ -158,20 +265,19 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
                         ? "HOLD BOOT TO ARM" : "TAP = NEXT   HOLD = ARM";
                 cv_text_center(cv, W / 2, 70, hint, DU_DIM, -1, 1);
                 if (st->wifi_on) {
-                    /* Everything needed to reach the console, on the screen -
-                     * so there are no shared default credentials to leak. */
-                    char l1[40], l2[40], l3[44];
+                    /* Just the network name here; the key and the console login
+                     * live on the CONSOLE screen, drawn large and with a QR. */
+                    char l1[44];
                     snprintf(l1, sizeof(l1), "AP  %s", st->wifi_ssid ? st->wifi_ssid : "-");
-                    cv_text_center(cv, W / 2, 84, l1, DU_SAFE, -1, 1);
-                    if (st->wifi_key) {
-                        snprintf(l2, sizeof(l2), "KEY %s", st->wifi_key);
-                        cv_text_center(cv, W / 2, 96, l2, DU_INK, -1, 1);
-                    }
-                    if (st->admin_pw) {
-                        snprintf(l3, sizeof(l3), "%s / %s",
-                                 st->admin_user ? st->admin_user : "admin", st->admin_pw);
-                        cv_text_center(cv, W / 2, 108, l3, DU_ARMED, -1, 1);
-                    }
+                    cv_text_center(cv, W / 2, 88, l1, DU_SAFE, -1, 1);
+                    if (st->ui_lock == UI_LOCK_OFF)
+                        cv_text_center(cv, W / 2, 104, "SETTINGS > CONSOLE INFO",
+                                       cv_rgb(90, 74, 86), -1, 1);
+                } else if (st->safe_boot) {
+                    /* Tell the operator the device chose to come up reduced,
+                     * rather than leaving them to wonder where the radio went. */
+                    cv_text_center(cv, W / 2, 88, "SAFE BOOT - RADIO OFF", DU_ARMED, -1, 1);
+                    cv_text_center(cv, W / 2, 100, "LAST BOOT CRASHED", DU_DIM, -1, 1);
                 } else {
                     cv_text_center(cv, W / 2, 90, "DEVICE WILL NOT TYPE", cv_rgb(90,74,86), -1, 1);
                     cv_text_center(cv, W / 2, 108,
@@ -214,7 +320,8 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
             }
             cv_text_center(cv, W / 2, 92, "TAP TO ABORT", DU_DIM, -1, 1);
             break;
-        case DUI_MENU: break;      /* drawn above; listed so -Wswitch stays happy */
+        case DUI_MENU:
+        case DUI_INFO: break;   /* drawn above; listed so -Wswitch stays happy */
         case DUI_DONE:
             cv_text_center(cv, W / 2, 60, st->dry_run ? "DRY-RUN COMPLETE" : "PAYLOAD SENT", DU_INK, -1, 1);
             cv_text_center(cv, W / 2, 78, "TAP TO RETURN TO SAFE", DU_DIM, -1, 1);
@@ -231,5 +338,5 @@ void dui_render_splash(canvas_t *cv)
     draw_kbd(cv, W / 2 - 46, 44, DU_ACCENT);
     cv_text(cv, W / 2 - 22, 40, "DOLOS", DU_INK, -1, 3);
     cv_text_center(cv, W / 2, 74, "USB-HID PAYLOAD RUNNER", DU_DIM, -1, 1);
-    cv_text_center(cv, W / 2, 92, "AUTHORIZED LAB USE ONLY", DU_ACCENT, -1, 1);
+    cv_text_center(cv, W / 2, 92, WARN_TAG, DU_ACCENT, -1, 1);
 }

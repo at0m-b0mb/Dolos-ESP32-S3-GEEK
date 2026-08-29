@@ -29,13 +29,18 @@ typedef enum {
     MENU_DRYRUN,       /* preview without typing            */
     MENU_WIFI,         /* wireless console on/off           */
     MENU_REMOTE_FIRE,  /* allow console-triggered firing    */
+    MENU_CONSOLE_INFO, /* show the join QR + credentials    */
+    MENU_NEW_CREDS,    /* mint fresh console secrets        */
+    MENU_FACTORY,      /* wipe credentials + saved config   */
     MENU_SAVE,         /* write DOLOS.CFG back to the card  */
     MENU_EXIT,         /* leave the menu                    */
     MENU__COUNT
 } menu_item_t;
 
 /* What activating an item asked the caller to do. */
-typedef enum { MENU_ACT_NONE = 0, MENU_ACT_SAVE, MENU_ACT_EXIT } menu_action_t;
+typedef enum { MENU_ACT_NONE = 0, MENU_ACT_SAVE, MENU_ACT_EXIT,
+               MENU_ACT_CONSOLE_INFO, MENU_ACT_NEW_CREDS,
+               MENU_ACT_FACTORY } menu_action_t;
 
 const char *menu_label(menu_item_t item);
 

@@ -2,6 +2,73 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.6.0] - 2026-08-29
+First release verified **on real hardware**, and the bugs that found were the
+point. Plus a scannable console QR, an authorised factory reset, and opt-in
+device hardening.
+
+### Fixed - found by running it on the board
+- **Boot loop.** `net_wifi.c` used `ESP_ERROR_CHECK` on six calls, so a harmless
+  `ESP_ERR_INVALID_STATE` from `esp_event_loop_create_default()` (the loop
+  already existed) *aborted and rebooted the device*, forever. Every step now
+  fails gracefully and logs why: the console is a convenience, and the device
+  must come up without it.
+- **Garbled, overlapping text.** `esp_lcd_panel_draw_bitmap()` is asynchronous -
+  it queues a DMA transfer and returns. The v0.5 dirty-row flush staged every
+  span through one buffer and refilled it while the previous transfer was still
+  in flight, so the panel drew one region's pixels at another's coordinates. The
+  flush now waits on a transfer-done callback before reusing the buffer.
+- **Death on a normal boot while surviving FLASH MODE.** The 64 KB framebuffer
+  was allocated from *internal* DMA RAM, which nothing DMAs from any more, and
+  it starved Wi-Fi, TinyUSB and the HTTP server. It lives in PSRAM now.
+- UI task stack raised for the settings menu; `strnlen` (POSIX, not ISO C)
+  dropped from the fuzz suite, which had broken the Linux CI gate.
+
+### Security
+- **Credentials are generated with a real entropy source.** `esp_random()` is
+  only a true RNG while the RF subsystem is running, and credentials are minted
+  *before* the radio starts - precisely the weak window. The SAR-ADC entropy
+  source is now enabled for that moment and switched off before Wi-Fi or the ADC
+  driver touch the hardware.
+- **Credentials are no longer rotated on a firmware change.** It protected
+  nothing - NVS is plaintext flash, so anyone holding the device can read the
+  key out with `esptool read_flash` without reflashing - and it silently changed
+  the Wi-Fi key on every rebuild. Rotation is explicit now: **NEW CREDENTIALS**
+  in the menu.
+- The admin password is no longer shown permanently on the SAFE screen; it lives
+  on the CONSOLE INFO screen you have to open.
+
+### Added
+- **Console join QR.** Settings -> **CONSOLE INFO** shows a scannable
+  `WIFI:T:WPA;S:..;P:..;;` QR - point a phone camera at it and join, no typing.
+  Credentials beside it are drawn at double size and **auto-fit**: too long for
+  the column and they drop to single size and clip, never spilling off the panel
+  (a geometry test caught a real 164 px overflow before it reached hardware).
+  QR encoding by Project Nayuki's qrcodegen, MIT, vendored with attribution.
+- **Factory reset** - the only reversal Dolos can honestly offer. Wipes the
+  generated secrets and saved config, restarts, mints fresh ones; payloads are
+  left alone. On the device via the menu (blocked by `ui_lock`), or over the
+  console at `POST /api/factory_reset` for an **admin** session with CSRF.
+- **Opt-in hardening**: `docs/HARDENING.md` and `tools/harden.sh` for flash
+  encryption and Secure Boot v2. The tool never burns an eFuse itself - it
+  writes an sdkconfig fragment and prints the command you type, and every
+  permanent step demands a typed confirmation phrase. **Nothing here is enabled
+  by default.** Documented plainly: Secure Boot v2 cannot be disabled by anyone,
+  with any password, ever. eFuses are one-way. There is no unlock.
+- **Boot-loop guard**: two consecutive crashes and the next boot skips the
+  optional subsystems and says `SAFE BOOT - RADIO OFF` on screen. A device that
+  bricks itself over a bad setting is worse than one that boots without its
+  radio and tells you.
+- The settings menu **scrolls** now that it has ten entries, with more-above and
+  more-below markers.
+
+### Changed
+- The standing on-screen reminder is **`AUTHORIZED USE ONLY`** (was
+  `LAB USE ONLY`): Dolos is used on real engagements, and what makes that use
+  legitimate is written authorization, not the room you are in. Its footer
+  geometry is pinned by a test so widening it can never collide with the LED
+  indicators again.
+
 ## [0.5.0] - 2026-08-29
 On-device settings, payload validation, hardening, and a faster engine.
 

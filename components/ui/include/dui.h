@@ -4,12 +4,13 @@
  * Pure C, host-testable. Shows the safety state front and centre so the operator
  * always knows whether the device will type, plus the selected payload, the
  * target keyboard layout, the injection speed, a DRY-RUN badge, and a PIN-entry
- * screen. A persistent "LAB USE ONLY" tag never leaves the screen.
+ * screen. A persistent "AUTHORIZED USE ONLY" tag never leaves the screen.
  */
 #ifndef DOLOS_DUI_H
 #define DOLOS_DUI_H
 #include "canvas.h"
 #include "menu.h"   /* settings model drawn by the menu screen */
+#include "qrcodegen.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,7 @@ typedef enum {
     DUI_COUNTDOWN,  /* 3-2-1 before it types; tap aborts          */
     DUI_RUNNING,    /* sending the payload; tap aborts            */
     DUI_MENU,       /* settings menu: tap=next, hold=change       */
+    DUI_INFO,       /* console join screen: QR + big credentials  */
     DUI_DONE,       /* payload sent                               */
 } dui_mode_t;
 
@@ -49,6 +51,7 @@ typedef struct {
     bool     remote_fire_enabled; /* admin allowed remote fire -> banner  */
     int      menu_sel;         /* highlighted settings row (DUI_MENU)     */
     const dolos_config_t *cfg; /* live settings, shown in the menu        */
+    bool     safe_boot;        /* last boot crashed: optional subsystems off */
     ui_lock_t ui_lock;         /* how much of the UI the button may reach */
     int      lint_problems;    /* >0 = payload has errors, arming blocked */
     int      lint_line;        /* line number of the first problem        */

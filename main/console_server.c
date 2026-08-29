@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_http_server.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -192,6 +194,18 @@ static esp_err_t h_arm(httpd_req_t *r)
     reply_json(r, bridge_remote_arm() ? "200 OK" : "409 Conflict",
                bridge_remote_arm() ? "{\"armed\":1}" : "{\"err\":\"busy\"}"); return ESP_OK;
 }
+static esp_err_t h_factory_reset(httpd_req_t *r)
+{
+    /* Admin only, and CSRF-checked: this throws away every credential on the
+     * device. It is the authorised counterpart to the eFuse options, which
+     * nothing can reverse. */
+    if (!require(r, PERM_EDIT_CONFIG, true)) return ESP_OK;
+    reply_json(r, "200 OK", "{\"ok\":1,\"restarting\":1}");
+    vTaskDelay(pdMS_TO_TICKS(250));      /* let the reply reach the browser */
+    dolos_factory_reset();
+    return ESP_OK;
+}
+
 static esp_err_t h_abort(httpd_req_t *r)
 {
     if (!require(r, PERM_RUN, true)) return ESP_OK;
@@ -245,6 +259,7 @@ bool console_server_start(const char *admin_user, const char *admin_pass, bool r
     reg(srv, "/api/remotefire", HTTP_POST, h_remotefire);
     reg(srv, "/api/arm",        HTTP_POST, h_arm);
     reg(srv, "/api/abort",      HTTP_POST, h_abort);
+    reg(srv, "/api/factory_reset", HTTP_POST, h_factory_reset);
 
     ESP_LOGI(TAG, "console up. admin user='%s' pass='%s'", au, g_admin_pass);
     return true;

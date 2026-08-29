@@ -1,6 +1,8 @@
 #include "display.h"
 #include "board.h"
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
@@ -16,14 +18,38 @@ static canvas_t  s_canvas;
 static bool      s_ok;
 static uint16_t *s_shadow;        /* last frame sent to the panel        */
 static uint16_t *s_tx;            /* DMA staging for one dirty span      */
+static SemaphoreHandle_t s_tx_done;  /* signalled when a span has landed */
 #define SPAN_ROWS 24              /* max rows per transfer (~11.5 KB)    */
+
+/* esp_lcd_panel_draw_bitmap() is ASYNCHRONOUS: it queues a DMA transfer and
+ * returns. Since every span is staged through the one s_tx buffer, the flush
+ * must wait for each transfer to land before refilling it - otherwise the next
+ * span overwrites pixels that are still on their way to the panel, and the
+ * display shows one span's content at another span's coordinates. That is
+ * exactly what produced the overlapping, garbled text on hardware. */
+static bool IRAM_ATTR on_color_trans_done(esp_lcd_panel_io_handle_t io,
+                                          esp_lcd_panel_io_event_data_t *ev,
+                                          void *ctx)
+{
+    (void)io; (void)ev; (void)ctx;
+    BaseType_t hp = pdFALSE;
+    xSemaphoreGiveFromISR(s_tx_done, &hp);
+    return hp == pdTRUE;
+}
 
 #define FB_PIX (BOARD_LCD_H_RES * BOARD_LCD_V_RES)
 
 bool display_init(void)
 {
-    s_fb = heap_caps_malloc(FB_PIX * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!s_fb) s_fb = heap_caps_malloc(FB_PIX * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    /* The framebuffer lives in PSRAM, NOT internal DMA RAM.
+     *
+     * Nothing DMAs out of it any more - only the small staging buffer below is
+     * ever handed to the SPI engine - so spending 64 KB of scarce internal RAM
+     * on it starved Wi-Fi, TinyUSB and the HTTP server, and the firmware died
+     * on a normal boot while surviving in FLASH MODE (where none of those
+     * start). That asymmetry is what made the bug look like a display fault. */
+    s_fb = heap_caps_malloc(FB_PIX * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    if (!s_fb) s_fb = heap_caps_malloc(FB_PIX * sizeof(uint16_t), MALLOC_CAP_DMA);
     if (!s_fb) { ESP_LOGE(TAG, "no memory for framebuffer"); return false; }
     /* Shadow = what the panel is currently showing, so flush can send only the
      * rows that actually changed. Scratch = a small DMA-capable staging buffer
@@ -33,6 +59,8 @@ bool display_init(void)
     if (!s_shadow) s_shadow = heap_caps_malloc(FB_PIX * sizeof(uint16_t), MALLOC_CAP_DEFAULT);
     s_tx = heap_caps_malloc(SPAN_ROWS * BOARD_LCD_H_RES * sizeof(uint16_t), MALLOC_CAP_DMA);
     if (s_shadow) memset(s_shadow, 0xA5, FB_PIX * sizeof(uint16_t));   /* force a full first paint */
+    s_tx_done = xSemaphoreCreateBinary();
+    if (!s_tx_done) { ESP_LOGE(TAG, "no semaphore for display transfers"); return false; }
     cv_init(&s_canvas, s_fb, BOARD_LCD_H_RES, BOARD_LCD_V_RES);
 
     gpio_config_t bl = { .pin_bit_mask = 1ULL << BOARD_LCD_PIN_BL,
@@ -57,6 +85,7 @@ bool display_init(void)
         .lcd_cmd_bits = 8, .lcd_param_bits = 8,
         .spi_mode = 0,
         .trans_queue_depth = 10,
+        .on_color_trans_done = on_color_trans_done,
     };
     if (esp_lcd_new_panel_io_spi(BOARD_LCD_SPI_HOST, &io_cfg, &io) != ESP_OK) return false;
 
@@ -93,6 +122,7 @@ void display_flush(void)
     if (!s_shadow || !s_tx) {              /* fallback: whole frame, swapped in place */
         for (int i = 0; i < FB_PIX; i++) s_fb[i] = (uint16_t)((s_fb[i] << 8) | (s_fb[i] >> 8));
         esp_lcd_panel_draw_bitmap(s_panel, 0, 0, W, H, s_fb);
+        xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(200));
         return;
     }
 
@@ -125,5 +155,7 @@ void display_flush(void)
             }
         }
         esp_lcd_panel_draw_bitmap(s_panel, 0, start, W, start + rows, s_tx);
+        /* wait for the DMA to finish before this buffer is reused */
+        xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(200));
     }
 }

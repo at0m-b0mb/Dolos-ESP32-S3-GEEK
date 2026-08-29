@@ -12,6 +12,9 @@ const char *menu_label(menu_item_t item)
         case MENU_DRYRUN:      return "DRY RUN";
         case MENU_WIFI:        return "WIFI CONSOLE";
         case MENU_REMOTE_FIRE: return "REMOTE FIRE";
+        case MENU_CONSOLE_INFO:return "CONSOLE INFO";
+        case MENU_NEW_CREDS:   return "NEW CREDENTIALS";
+        case MENU_FACTORY:     return "FACTORY RESET";
         case MENU_SAVE:        return "SAVE TO CARD";
         case MENU_EXIT:        return "EXIT";
         default:               return "-";
@@ -53,6 +56,9 @@ menu_action_t menu_activate(dolos_config_t *c, menu_item_t item)
         case MENU_DRYRUN:      c->dry_run     = !c->dry_run;     break;
         case MENU_WIFI:        c->wifi_on     = !c->wifi_on;     break;
         case MENU_REMOTE_FIRE: c->remote_fire = !c->remote_fire; break;
+        case MENU_CONSOLE_INFO:return MENU_ACT_CONSOLE_INFO;
+        case MENU_NEW_CREDS:   return MENU_ACT_NEW_CREDS;
+        case MENU_FACTORY:     return MENU_ACT_FACTORY;
         case MENU_SAVE:        return MENU_ACT_SAVE;
         case MENU_EXIT:        return MENU_ACT_EXIT;
         default: break;
