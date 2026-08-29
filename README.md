@@ -37,12 +37,14 @@ The GEEK's USB-A plug goes straight into a host, and the ESP32-S3 has native USB
 
 |  | Dolos |
 |---|---|
-| **Payload language** | DuckyScript-style — `STRING`, `DELAY`, `GUI/CTRL/ALT/SHIFT` combos, F-keys, arrows, `REPEAT`, `DEFAULTDELAY` |
-| **Payload source** | Plain-text `PAYLOAD.TXT` on microSD (readable, auditable) — or a harmless built-in demo |
+| **Payload language** | DuckyScript-style — `STRING`, `DELAY`, `GUI/CTRL/ALT/SHIFT` combos, F-keys, arrows, `REPEAT`, `DEFAULTDELAY`, mouse, media, `UNICODE` |
+| **Payload source** | Plain-text `*.txt` on microSD (readable, auditable), picked on-screen or edited from the web console — or a harmless built-in demo |
 | **On-screen mission control** | Live `SAFE → ARMED → FIRING → RUNNING → SENT` with per-line progress |
-| **Arming** | Two deliberate BOOT-button holds + a 3-2-1 countdown; tap aborts anytime |
+| **Arming** | Two deliberate BOOT-button holds + a 3-2-1 countdown; tap aborts anytime; optional arm-PIN |
 | **Flash-mode escape hatch** | Hold BOOT while plugging in → USB-HID never starts (stays serial, safe to re-flash) |
-| **Tested** | Pure-C engine with **42 host unit tests**; UI verified never to draw off-panel |
+| **Remote management** | Optional WPA2 web console with RBAC — admin-gated remote fire, never covert |
+| **International** | 10 keyboard layouts + Unicode “type anything” (Win/Linux/macOS) |
+| **Tested** | Pure-C engines with **131 host unit checks**; UI verified never to draw off-panel |
 
 <p align="center">
   <img src="docs/img/dui_safe.png" width="49%" alt="SAFE screen">
@@ -121,35 +123,48 @@ Because Dolos becomes a **keyboard** after boot, its serial port disappears. To 
 ## 🧠 Architecture
 
 ```
-components/ducky/     Pure-C DuckyScript engine + US HID keymap   (host-tested)
-components/ui/         Canvas + 5×8 font + mission-control UI       (host-tested)
-main/usb_hid.c         TinyUSB HID keyboard device + descriptors
+components/ducky/      DuckyScript engine, HID keymap, 10 layouts,
+                       Unicode "type anything", config parser   (host-tested)
+components/dconsole/   Console security core: RBAC, PBKDF2 creds,
+                       sessions, CSRF, lockout                  (host-tested)
+components/ui/         Canvas + 5×8 font + mission-control UI    (host-tested)
+main/usb_hid.c         TinyUSB HID keyboard+mouse+consumer device
 main/payload.c         SD payload loader + player (honors abort)
-main/dolos_main.c      Safety state machine + BOOT-button control
+main/dolos_main.c      Safety state machine + BOOT control + console bridge
+main/console_server.c  HTTP console endpoints (+ embedded console.html)
+main/net_wifi.c        WPA2 SoftAP
 main/display.c         ST7789 1.14" LCD driver
-test/host/             42 unit tests — build & run with `make -C test/host`
+test/host/             131 unit checks — `make -C test/host`
 ```
 
 The engine has **zero hardware dependencies**, so the whole keymap + parser is exercised on a laptop before it ever drives a real keyboard:
 
 ```bash
-make -C test/host        # keymap: 20 checks · ducky: 22 checks · ui: 7 checks
+make -C test/host   # keymap 20 · ducky 27 · ui 7 · layout 12 · config 11 · auth 29 · unicode 25
 ```
 
-## 🗺 Roadmap
+## 🏢 Enterprise features — all shipped
 
-Dolos is built to grow into a professional, enterprise-grade authorized-testing tool. Planned:
+Everything on the original roadmap is implemented, host-tested, and released:
 
-- ⚡ **Faster injection** — 1 ms USB polling + configurable speed profiles (fast / balanced / reliable)
-- 🌍 **Keyboard-layout profiles** — US / UK / DE / FR / ES …
-- 🗂 **Multi-payload picker** — choose among many payloads on the SD card, on-screen
-- 🖥 **Target-OS profiles** — Windows / macOS / Linux key handling
-- 👁 **Dry-run mode** — preview keystrokes on the LCD without sending (authorized demos)
-- 📝 **Engagement audit log** — every run recorded to SD (payload, line count, aborted?) for accountability
-- 🔒 **On-device PIN arming** — a code to arm, so a lost device can't be misused
-- 🖱 **Extended HID** — media keys + mouse (jiggler / positioning)
+| Feature | Status | How you use it |
+|---|---|---|
+| ⚡ **Faster injection** — 1 ms USB polling + speed profiles | ✅ v0.2 | `speed=fast\|balanced\|reliable` |
+| 🌍 **Keyboard layouts** — 10 of them | ✅ v0.2 / v0.4 | `layout=us\|uk\|de\|fr\|es\|it\|pt\|se\|ch\|latam` |
+| 🗂 **Multi-payload picker** — on-screen | ✅ v0.2 | Drop several `*.txt` on SD; TAP = next |
+| 🖥 **Target-OS profiles** — Win / macOS / Linux | ✅ v0.4 | `os=windows\|linux\|mac` (drives Unicode input) |
+| 👁 **Dry-run mode** — preview, send nothing | ✅ v0.2 | `dryrun=on` |
+| 📝 **Engagement audit log** | ✅ v0.2 | `/sdcard/DOLOS_AUDIT.LOG`, also viewable in the console |
+| 🔒 **On-device PIN arming** | ✅ v0.2 | `armpin=231` (tap-dialed) |
+| 🖱 **Extended HID** — mouse + media | ✅ v0.2 | `MOUSEMOVE/MOUSECLICK/MOUSEWHEEL`, `MEDIA …` |
+| 💡 **LED exfil return channel** | ✅ v0.2 | Host Caps/Num/Scroll shown on the LCD |
+| 🆔 **Configurable USB identity** | ✅ v0.2 | `usb_vid` / `usb_pid` / `usb_mfr` / `usb_product` |
+| 📡 **Secure wireless console** — RBAC, PBKDF2, CSRF | ✅ v0.3 | `wifi=ap` — see [above](#-wireless-console-v03) |
+| 🌐 **Unicode "type anything"** | ✅ v0.4 | `STRING café 日本語`, `UNICODE <hex>` |
 
-See [Issues](https://github.com/at0m-b0mb/Dolos-ESP32-S3-GEEK/issues) to propose or prioritize.
+**Next up:** per-device **HTTPS** for the console (transport is WPA2-only today) · Secure Boot v2 + flash encryption · payload encryption at rest.
+
+See [Issues](https://github.com/at0m-b0mb/Dolos-ESP32-S3-GEEK/issues) to propose or prioritize, and the [CHANGELOG](CHANGELOG.md) for the full history.
 
 ## 📟 Hardware
 
