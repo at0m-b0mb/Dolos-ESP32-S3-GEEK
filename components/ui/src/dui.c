@@ -5,21 +5,21 @@
 #define W 240
 #define H 135
 
-/* Dolos palette: red-team accent, safety-forward state colors. */
 #define DU_BG      cv_rgb(10, 8, 14)
 #define DU_PANEL   cv_rgb(26, 16, 24)
 #define DU_INK     cv_rgb(236, 228, 240)
 #define DU_DIM     cv_rgb(140, 120, 150)
-#define DU_ACCENT  cv_rgb(230, 70, 90)     /* Dolos crimson            */
-#define DU_SAFE    cv_rgb(60, 200, 130)    /* green                    */
-#define DU_ARMED   cv_rgb(240, 180, 60)    /* amber                    */
-#define DU_FIRE    cv_rgb(240, 70, 70)     /* red                      */
-#define DU_DONE    cv_rgb(90, 160, 255)    /* blue                     */
+#define DU_ACCENT  cv_rgb(230, 70, 90)
+#define DU_SAFE    cv_rgb(60, 200, 130)
+#define DU_ARMED   cv_rgb(240, 180, 60)
+#define DU_FIRE    cv_rgb(240, 70, 70)
+#define DU_DONE    cv_rgb(90, 160, 255)
 
 static uint16_t mode_color(dui_mode_t m)
 {
     switch (m) {
         case DUI_SAFE:      return DU_SAFE;
+        case DUI_PINENTRY:  return DU_ARMED;
         case DUI_ARMED:     return DU_ARMED;
         case DUI_COUNTDOWN: return DU_FIRE;
         case DUI_RUNNING:   return DU_FIRE;
@@ -30,6 +30,7 @@ static const char *mode_word(dui_mode_t m)
 {
     switch (m) {
         case DUI_SAFE:      return "SAFE";
+        case DUI_PINENTRY:  return "PIN";
         case DUI_ARMED:     return "ARMED";
         case DUI_COUNTDOWN: return "FIRING";
         case DUI_RUNNING:   return "RUNNING";
@@ -37,14 +38,13 @@ static const char *mode_word(dui_mode_t m)
     }
 }
 
-/* a little keyboard glyph, to say "this is a keyboard" */
 static void draw_kbd(canvas_t *cv, int x, int y, uint16_t c)
 {
     cv_rect(cv, x, y, 18, 11, c);
     for (int r = 0; r < 2; r++)
         for (int k = 0; k < 5; k++)
             cv_pixel(cv, x + 3 + k * 3, y + 3 + r * 3, c);
-    cv_hline(cv, x + 5, y + 8, 8, c);           /* space bar */
+    cv_hline(cv, x + 5, y + 8, 8, c);
 }
 
 static void draw_header(canvas_t *cv, const dui_state_t *st)
@@ -52,7 +52,11 @@ static void draw_header(canvas_t *cv, const dui_state_t *st)
     cv_fill_rect(cv, 0, 0, W, 15, DU_PANEL);
     draw_kbd(cv, 4, 2, DU_ACCENT);
     cv_text(cv, 27, 1, "DOLOS", DU_INK, -1, 2);
-    /* USB mount indicator, right */
+    if (st->dry_run) {
+        int x = 92;
+        cv_fill_rect(cv, x, 3, 34, 10, DU_ARMED);
+        cv_text(cv, x + 3, 4, "DRY", DU_BG, -1, 1);
+    }
     const char *u = st->usb_mounted ? "USB LINK" : "NO HOST";
     uint16_t uc = st->usb_mounted ? DU_SAFE : DU_DIM;
     cv_fill_circle(cv, W - cv_text_width(u, 1) - 9, 7, 3, uc);
@@ -64,9 +68,14 @@ static void draw_footer(canvas_t *cv, const dui_state_t *st)
 {
     cv_hline(cv, 0, H - 12, W, cv_rgb(40, 26, 38));
     char buf[40];
-    snprintf(buf, sizeof(buf), "%s  %d LN",
-             st->payload_name ? st->payload_name : "-", st->total_lines);
+    snprintf(buf, sizeof(buf), "%s / %s", st->layout ? st->layout : "US",
+             st->speed ? st->speed : "BAL");
     cv_text(cv, 4, H - 10, buf, DU_DIM, -1, 1);
+    /* keyboard-LED return channel: lit letters = bit set on the host */
+    int lx = 96;
+    cv_text(cv, lx,      H - 10, "C", (st->leds & 0x02) ? DU_SAFE : cv_rgb(60,50,58), -1, 1);
+    cv_text(cv, lx + 8,  H - 10, "N", (st->leds & 0x01) ? DU_SAFE : cv_rgb(60,50,58), -1, 1);
+    cv_text(cv, lx + 16, H - 10, "S", (st->leds & 0x04) ? DU_SAFE : cv_rgb(60,50,58), -1, 1);
     cv_text(cv, W - cv_text_width("LAB USE ONLY", 1) - 3, H - 10, "LAB USE ONLY", DU_ACCENT, -1, 1);
 }
 
@@ -85,36 +94,58 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
 {
     cv_clear(cv, DU_BG);
     uint16_t mc = mode_color(st->mode);
-
-    /* big state word, centred */
-    cv_text_center(cv, W / 2, 26, mode_word(st->mode), mc, -1, 3);
+    cv_text_center(cv, W / 2, 24, mode_word(st->mode), mc, -1, 3);
 
     switch (st->mode) {
-        case DUI_SAFE:
-            cv_text_center(cv, W / 2, 58, "DEVICE WILL NOT TYPE", DU_DIM, -1, 1);
-            cv_text_center(cv, W / 2, 78, "HOLD  BOOT  TO  ARM", DU_INK, -1, 1);
+        case DUI_SAFE: {
+            char pl[40];
+            if (st->payload_count > 1)
+                snprintf(pl, sizeof(pl), "%d/%d  %s", st->payload_idx, st->payload_count,
+                         st->payload_name ? st->payload_name : "-");
+            else
+                snprintf(pl, sizeof(pl), "%s", st->payload_name ? st->payload_name : "demo");
+            cv_text_center(cv, W / 2, 54, pl, DU_INK, -1, 1);
+            cv_text_center(cv, W / 2, 70,
+                st->payload_count > 1 ? "TAP = NEXT   HOLD = ARM" : "HOLD BOOT TO ARM", DU_DIM, -1, 1);
+            cv_text_center(cv, W / 2, 90, "DEVICE WILL NOT TYPE", cv_rgb(90,74,86), -1, 1);
             break;
+        }
+        case DUI_PINENTRY: {
+            cv_text_center(cv, W / 2, 52, "ENTER PIN", DU_INK, -1, 1);
+            /* committed digits as dots, current digit as a number */
+            int total = st->pin_len > 0 ? st->pin_len : 1;
+            int cx = W / 2 - (total * 12) / 2;
+            for (int i = 0; i < total; i++) {
+                if (i < st->pin_pos) cv_fill_circle(cv, cx + i * 12 + 4, 70, 4, DU_SAFE);
+                else                 cv_circle(cv, cx + i * 12 + 4, 70, 4, DU_DIM);
+            }
+            char d[4]; snprintf(d, sizeof(d), "%d", st->pin_cur);
+            cv_text_center(cv, W / 2, 82, d, DU_ARMED, -1, 2);
+            cv_text_center(cv, W / 2, 104, "TAP = DIGIT   HOLD = OK", DU_DIM, -1, 1);
+            break;
+        }
         case DUI_ARMED:
-            cv_text_center(cv, W / 2, 58, "HOLD BOOT TO FIRE", DU_INK, -1, 1);
+            cv_text_center(cv, W / 2, 56, "HOLD BOOT TO FIRE", DU_INK, -1, 1);
             cv_text_center(cv, W / 2, 74, "TAP TO CANCEL", DU_DIM, -1, 1);
             break;
         case DUI_COUNTDOWN: {
             char n[4]; snprintf(n, sizeof(n), "%d", st->countdown);
-            cv_text_center(cv, W / 2, 52, n, DU_FIRE, -1, 5);
-            cv_text_center(cv, W / 2, 98, "TAP TO ABORT", DU_DIM, -1, 1);
+            cv_text_center(cv, W / 2, 50, n, DU_FIRE, -1, 5);
+            cv_text_center(cv, W / 2, 100, "TAP TO ABORT", DU_DIM, -1, 1);
             break;
         }
         case DUI_RUNNING:
-            progress_bar(cv, 24, 62, W - 48, 9, st->cur_line, st->total_lines, DU_FIRE);
+            progress_bar(cv, 24, 60, W - 48, 9, st->cur_line, st->total_lines, st->dry_run ? DU_ARMED : DU_FIRE);
             {
-                char b[28]; snprintf(b, sizeof(b), "LINE %d / %d", st->cur_line, st->total_lines);
-                cv_text_center(cv, W / 2, 78, b, DU_INK, -1, 1);
+                char b[32]; snprintf(b, sizeof(b), "%sLINE %d / %d",
+                                     st->dry_run ? "DRY  " : "", st->cur_line, st->total_lines);
+                cv_text_center(cv, W / 2, 76, b, DU_INK, -1, 1);
             }
-            cv_text_center(cv, W / 2, 94, "TAP TO ABORT", DU_DIM, -1, 1);
+            cv_text_center(cv, W / 2, 92, "TAP TO ABORT", DU_DIM, -1, 1);
             break;
         case DUI_DONE:
-            cv_text_center(cv, W / 2, 62, "PAYLOAD SENT", DU_INK, -1, 1);
-            cv_text_center(cv, W / 2, 80, "TAP TO RETURN TO SAFE", DU_DIM, -1, 1);
+            cv_text_center(cv, W / 2, 60, st->dry_run ? "DRY-RUN COMPLETE" : "PAYLOAD SENT", DU_INK, -1, 1);
+            cv_text_center(cv, W / 2, 78, "TAP TO RETURN TO SAFE", DU_DIM, -1, 1);
             break;
     }
     draw_header(cv, st);

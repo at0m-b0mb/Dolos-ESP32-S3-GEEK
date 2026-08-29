@@ -44,16 +44,21 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
 {
     for (int i = 0; i < n; i++) {
         if (ctx->abort && *ctx->abort) return;
-        if (a[i].kind == DUCKY_DELAY) vTaskDelay(pdMS_TO_TICKS(a[i].delay_ms));
-        else                          usb_hid_tap(a[i].mods, a[i].key);
+        if (a[i].kind == DUCKY_DELAY) { vTaskDelay(pdMS_TO_TICKS(a[i].delay_ms)); }
+        else if (ctx->dry_run)        { vTaskDelay(pdMS_TO_TICKS(2)); }  /* preview: emit nothing */
+        else if (a[i].kind == DUCKY_MOUSE)    { usb_hid_mouse(a[i].buttons, a[i].mx, a[i].my, a[i].wheel); }
+        else if (a[i].kind == DUCKY_CONSUMER) { usb_hid_consumer(a[i].consumer); }
+        else                          { usb_hid_tap(a[i].mods, a[i].key); }
     }
     if (default_delay) vTaskDelay(pdMS_TO_TICKS(default_delay));
 }
 
-void payload_run(const char *text, const payload_ctx_t *ctx)
+int payload_run(const char *text, const payload_ctx_t *ctx)
 {
     ducky_action_t acts[192];
     ducky_state_t st; ducky_state_init(&st);
+    st.layout = ctx->layout;
+    st.default_delay_ms = ctx->default_delay;
     int total = payload_count_lines(text), cur = 0;
 
     const char *p = text;
@@ -79,5 +84,6 @@ void payload_run(const char *text, const payload_ctx_t *ctx)
             play_actions(acts, n, st.default_delay_ms, ctx);
         }
     }
-    ESP_LOGI(TAG, "payload finished (%d lines)", cur);
+    ESP_LOGI(TAG, "payload %s (%d lines)%s", (ctx->abort && *ctx->abort) ? "ABORTED" : "finished", cur, ctx->dry_run ? " [dry-run]" : "");
+    return cur;
 }

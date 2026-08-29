@@ -81,4 +81,18 @@ TEST_MAIN_BEGIN
         ducky_state_init(&st);
         CHECK(ducky_parse_line(&st, "FLARP zonk", a, 64) == 0, "unknown combo -> 0 actions");
     }
+
+    SUITE("ducky: mouse + media commands");
+    {
+        ducky_state_init(&st);
+        int n = ducky_parse_line(&st, "MOUSEMOVE 20 -5", a, 64);
+        CHECK(n == 1 && a[0].kind == DUCKY_MOUSE && a[0].mx == 20 && a[0].my == -5, "MOUSEMOVE 20 -5");
+        n = ducky_parse_line(&st, "MOUSECLICK RIGHT", a, 64);
+        CHECK(n == 1 && a[0].kind == DUCKY_MOUSE && a[0].buttons == 2, "MOUSECLICK RIGHT");
+        n = ducky_parse_line(&st, "MOUSEWHEEL -3", a, 64);
+        CHECK(n == 1 && a[0].kind == DUCKY_MOUSE && a[0].wheel == -3, "MOUSEWHEEL -3");
+        n = ducky_parse_line(&st, "MEDIA VOLUP", a, 64);
+        CHECK(n == 1 && a[0].kind == DUCKY_CONSUMER && a[0].consumer == 0xE9, "MEDIA VOLUP");
+        CHECK(ducky_parse_line(&st, "MEDIA NONSENSE", a, 64) == 0, "unknown media -> nothing");
+    }
 TEST_MAIN_END

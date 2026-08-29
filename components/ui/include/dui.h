@@ -1,10 +1,10 @@
 /*
  * dui.h - the Dolos on-screen "mission control" for the ESP32-S3-GEEK LCD.
  *
- * Pure C, host-testable, draws into a canvas. It shows the safety state front
- * and centre so the operator always knows whether the device will type: SAFE is
- * calm green, ARMED amber, the COUNTDOWN a big red number, RUNNING shows live
- * progress, DONE confirms. A persistent "LAB USE ONLY" tag never leaves screen.
+ * Pure C, host-testable. Shows the safety state front and centre so the operator
+ * always knows whether the device will type, plus the selected payload, the
+ * target keyboard layout, the injection speed, a DRY-RUN badge, and a PIN-entry
+ * screen. A persistent "LAB USE ONLY" tag never leaves the screen.
  */
 #ifndef DOLOS_DUI_H
 #define DOLOS_DUI_H
@@ -16,6 +16,7 @@ extern "C" {
 
 typedef enum {
     DUI_SAFE = 0,   /* will not type; hold BOOT to arm            */
+    DUI_PINENTRY,   /* dialing the arm PIN                        */
     DUI_ARMED,      /* one more hold fires; tap cancels           */
     DUI_COUNTDOWN,  /* 3-2-1 before it types; tap aborts          */
     DUI_RUNNING,    /* sending the payload; tap aborts            */
@@ -24,12 +25,21 @@ typedef enum {
 
 typedef struct {
     dui_mode_t mode;
-    const char *payload_name;  /* e.g. "PAYLOAD.TXT" or "demo"    */
+    const char *payload_name;
+    int  payload_idx;          /* 1-based selection                */
+    int  payload_count;
     int  total_lines;
     int  cur_line;
-    int  countdown;            /* 3,2,1 for DUI_COUNTDOWN         */
-    bool usb_mounted;          /* host has enumerated us          */
-    uint16_t anim;            /* free-running animation phase    */
+    int  countdown;            /* 3,2,1 for DUI_COUNTDOWN           */
+    bool usb_mounted;
+    bool dry_run;
+    const char *layout;        /* "US","DE",...                    */
+    const char *speed;         /* "FAST","BALANCED","RELIABLE"     */
+    int  pin_len;              /* expected PIN digits              */
+    int  pin_pos;              /* digits committed so far          */
+    int  pin_cur;             /* current digit being dialed (1-9)  */
+    uint8_t  leds;             /* host LED bitmap: exfil return channel */
+    uint16_t anim;
 } dui_state_t;
 
 void dui_render(canvas_t *cv, const dui_state_t *st);

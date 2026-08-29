@@ -10,6 +10,7 @@
 #define HID_MOD_LSHIFT  0x02
 #define HID_MOD_LALT    0x04
 #define HID_MOD_LGUI    0x08
+#define HID_MOD_RALT    0x40   /* AltGr - international symbols */
 
 /* Letters/numbers */
 #define HID_KEY_NONE    0x00
@@ -46,5 +47,7 @@
 #define HID_KEY_DOWN    0x51
 #define HID_KEY_UP      0x52
 #define HID_KEY_MENU    0x65
+#define HID_KEY_NONUS_HASH   0x32  /* ISO key next to Enter   */
+#define HID_KEY_NONUS_BSLASH 0x64  /* ISO key next to L-Shift */
 
 #endif /* DOLOS_HID_KEYS_H */

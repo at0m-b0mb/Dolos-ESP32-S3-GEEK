@@ -16,24 +16,30 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "layout.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum { DUCKY_KEY = 0, DUCKY_DELAY } ducky_action_kind_t;
+typedef enum { DUCKY_KEY = 0, DUCKY_DELAY, DUCKY_MOUSE, DUCKY_CONSUMER } ducky_action_kind_t;
 
 typedef struct {
     uint8_t  kind;      /* ducky_action_kind_t                       */
     uint8_t  mods;      /* HID_MOD_* bitmask (KEY)                    */
     uint8_t  key;       /* HID usage id, 0 = modifier-only chord      */
     uint32_t delay_ms;  /* DELAY                                      */
+    int8_t   mx, my;    /* MOUSE relative move                        */
+    int8_t   wheel;     /* MOUSE wheel                                */
+    uint8_t  buttons;   /* MOUSE buttons bitmap (1=L,2=R,4=M); click  */
+    uint16_t consumer;  /* CONSUMER (media) usage code                */
 } ducky_action_t;
 
 typedef struct {
-    uint32_t default_delay_ms;   /* inserted between commands (DEFAULTDELAY) */
-    char     last_cmd[160];      /* remembered for REPEAT                    */
-    int      repeat;             /* pending REPEAT count (player consumes)   */
+    uint32_t    default_delay_ms;/* inserted between commands (DEFAULTDELAY) */
+    char        last_cmd[160];   /* remembered for REPEAT                    */
+    int         repeat;          /* pending REPEAT count (player consumes)   */
+    kb_layout_t layout;          /* target keyboard layout for STRING/chars  */
 } ducky_state_t;
 
 void ducky_state_init(ducky_state_t *st);

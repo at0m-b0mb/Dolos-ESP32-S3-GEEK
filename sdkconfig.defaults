@@ -20,3 +20,7 @@ CONFIG_TINYUSB_CDC_ENABLED=n
 
 # Console stays on USB-Serial/JTAG for boot logs (until HID takes the USB pins).
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# long filenames so payloads can be named readably on the SD picker
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=64

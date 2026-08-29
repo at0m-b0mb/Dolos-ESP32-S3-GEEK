@@ -2,6 +2,41 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.2.0] - 2026-08-29
+A large capability release: faster injection, international layouts, a payload
+picker, and professional/red-team features — still gated for **authorized** use.
+
+### Added — injection & payloads
+- **Fast injection + speed profiles.** USB HID poll interval dropped to 1 ms and
+  a configurable `speed=fast|balanced|reliable` profile (~4–8× faster typing).
+- **Keyboard-layout profiles** (`layout=us|uk|de|fr|es`): sends the scan codes
+  that produce the right characters on international targets. US is exact;
+  UK/DE/FR/ES cover the common letters, digits and symbols (verify AltGr).
+- **Multi-payload SD picker**: drop several `*.txt` payloads on the card and
+  choose the active one on-screen (TAP = next, HOLD = arm).
+
+### Added — professional / enterprise
+- **Dry-run preview** (`dryrun=on`): steps the payload and shows progress but
+  sends **no** keystrokes — for authorized demos and verification.
+- **Engagement audit log** to `/sdcard/DOLOS_AUDIT.LOG`: every run recorded with
+  payload, line count, result (sent/aborted), dry-run, layout and speed.
+- **On-device arm-PIN** (`armpin=…`): an optional tap-dialed code required to
+  arm, so a lost device can't be misused.
+- **`DOLOS.CFG` config file** on the SD card ties all of the above together.
+
+### Added — red-team (HID envelope; no network/DoS)
+- **Mouse control** in DuckyScript: `MOUSEMOVE x y`, `MOUSECLICK L|R|M`,
+  `MOUSEWHEEL n` (composite keyboard+mouse device).
+- **Media / consumer keys**: `MEDIA PLAY|NEXT|PREV|MUTE|VOLUP|VOLDOWN|…`.
+- **Keyboard-LED exfil return channel**: the host's Caps/Num/Scroll LED state is
+  captured and shown on-screen (a 3-bit channel back from the target).
+- **Configurable USB identity**: set `usb_vid`/`usb_pid`/`usb_mfr`/`usb_product`
+  for an authorized allow-list test. (Mechanism only — no baked-in brand
+  impersonation.)
+
+### Tests
+- **77 host unit checks** (keymap 20, ducky 27, UI 7, layout 12, config 11).
+
 ## [0.1.0] - 2026-08-21
 Initial public release — a safety-gated USB-HID payload runner for the
 Waveshare ESP32-S3-GEEK, for **authorized** security testing only.

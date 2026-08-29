@@ -1,14 +1,40 @@
 #include "ducky.h"
 #include "hid_keys.h"
+#include "layout.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdio.h>
+
+static int kw(const char *tok, const char *word);  /* case-insensitive equals */
+
+/* Consumer-control (media) usage codes, HID consumer page 0x0C. */
+static uint16_t media_usage(const char *n)
+{
+    if (kw(n,"PLAY")||kw(n,"PAUSE")||kw(n,"PLAYPAUSE")) return 0xCD;
+    if (kw(n,"NEXT")) return 0xB5;
+    if (kw(n,"PREV")||kw(n,"PREVIOUS")) return 0xB6;
+    if (kw(n,"STOP")) return 0xB7;
+    if (kw(n,"MUTE")) return 0xE2;
+    if (kw(n,"VOLUP")||kw(n,"VOLUMEUP")) return 0xE9;
+    if (kw(n,"VOLDOWN")||kw(n,"VOLUMEDOWN")) return 0xEA;
+    return 0;
+}
+static uint8_t mouse_button(const char *n)
+{
+    if (kw(n,"LEFT")||kw(n,"L")) return 1;
+    if (kw(n,"RIGHT")||kw(n,"R")) return 2;
+    if (kw(n,"MIDDLE")||kw(n,"M")) return 4;
+    return 0;
+}
+static int8_t clamp127(int v){ return (int8_t)(v>127?127:(v<-127?-127:v)); }
 
 void ducky_state_init(ducky_state_t *st)
 {
     st->default_delay_ms = 0;
     st->last_cmd[0] = 0;
     st->repeat = 0;
+    st->layout = LAYOUT_US;
 }
 
 static int kw(const char *tok, const char *word)  /* case-insensitive equals */
@@ -19,12 +45,12 @@ static int kw(const char *tok, const char *word)  /* case-insensitive equals */
 }
 
 /* Emit one KEY action per character of `s`. Returns count (<= max). */
-static int emit_string(const char *s, ducky_action_t *out, int max)
+static int emit_string(const char *s, kb_layout_t layout, ducky_action_t *out, int max)
 {
     int n = 0;
     for (; *s && n < max; s++) {
         uint8_t k, m;
-        if (!hid_from_ascii(*s, &k, &m)) continue;   /* skip unmapped bytes */
+        if (!hid_from_ascii_layout(*s, layout, &k, &m)) continue;  /* skip unmapped */
         out[n].kind = DUCKY_KEY; out[n].key = k; out[n].mods = m; out[n].delay_ms = 0;
         n++;
     }
@@ -70,12 +96,35 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         out[0].key = 0; out[0].mods = 0;
         return 1;
     }
-    if (kw(cmd, "STRING"))   return emit_string(rest, out, max);
+    if (kw(cmd, "STRING"))   return emit_string(rest, st->layout, out, max);
     if (kw(cmd, "STRINGLN")) {
-        int k = emit_string(rest, out, max);
+        int k = emit_string(rest, st->layout, out, max);
         if (k < max) { out[k].kind = DUCKY_KEY; out[k].key = HID_KEY_ENTER;
                        out[k].mods = 0; out[k].delay_ms = 0; k++; }
         return k;
+    }
+
+    if (kw(cmd, "MOUSEMOVE")) {
+        int x = 0, y = 0; sscanf(rest, "%d %d", &x, &y);
+        out[0].kind = DUCKY_MOUSE; out[0].mx = clamp127(x); out[0].my = clamp127(y);
+        out[0].wheel = 0; out[0].buttons = 0; out[0].key = 0; out[0].mods = 0;
+        return 1;
+    }
+    if (kw(cmd, "MOUSECLICK") || kw(cmd, "MOUSEBUTTON")) {
+        out[0].kind = DUCKY_MOUSE; out[0].buttons = mouse_button(rest);
+        out[0].mx = out[0].my = out[0].wheel = 0; out[0].key = 0; out[0].mods = 0;
+        return out[0].buttons ? 1 : 0;
+    }
+    if (kw(cmd, "MOUSEWHEEL") || kw(cmd, "MOUSESCROLL")) {
+        out[0].kind = DUCKY_MOUSE; out[0].wheel = clamp127(atoi(rest));
+        out[0].mx = out[0].my = 0; out[0].buttons = 0; out[0].key = 0; out[0].mods = 0;
+        return 1;
+    }
+    if (kw(cmd, "MEDIA") || kw(cmd, "CONSUMER")) {
+        uint16_t u = media_usage(rest);
+        if (!u) return 0;
+        out[0].kind = DUCKY_CONSUMER; out[0].consumer = u; out[0].key = 0; out[0].mods = 0;
+        return 1;
     }
 
     /* Otherwise: a key chord. Walk every token; modifiers OR together, the last
@@ -90,7 +139,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
                 uint8_t m, k;
                 if (hid_modifier(tok, &m))        mods |= m;
                 else if (hid_named_key(tok, &k)) { key = k; have_key = true; }
-                else if (p == 1 && hid_from_ascii(tok[0], &k, NULL)) { key = k; have_key = true; }
+                else if (p == 1 && hid_from_ascii_layout(tok[0], st->layout, &k, NULL)) { key = k; have_key = true; }
                 else invalid = true;
                 p = 0;
             }
