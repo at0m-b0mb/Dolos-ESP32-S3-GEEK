@@ -22,7 +22,17 @@
 extern "C" {
 #endif
 
-typedef enum { DUCKY_KEY = 0, DUCKY_DELAY, DUCKY_MOUSE, DUCKY_CONSUMER } ducky_action_kind_t;
+typedef enum {
+    DUCKY_KEY = 0,   /* tap key with a.mods (plus any held mods)   */
+    DUCKY_DELAY,     /* wait a.delay_ms                            */
+    DUCKY_MOUSE,     /* mouse move/click/wheel                     */
+    DUCKY_CONSUMER,  /* media / consumer usage                     */
+    DUCKY_HOLD,      /* press+HOLD a.mods across following keys     */
+    DUCKY_RELEASE    /* release all held modifiers                 */
+} ducky_action_kind_t;
+
+/* Target OS for the Unicode "type anything" input method. */
+typedef enum { OS_WINDOWS = 0, OS_LINUX, OS_MAC } target_os_t;
 
 typedef struct {
     uint8_t  kind;      /* ducky_action_kind_t                       */
@@ -40,6 +50,7 @@ typedef struct {
     char        last_cmd[160];   /* remembered for REPEAT                    */
     int         repeat;          /* pending REPEAT count (player consumes)   */
     kb_layout_t layout;          /* target keyboard layout for STRING/chars  */
+    target_os_t target_os;       /* OS for Unicode (STRING non-ASCII/UNICODE)*/
 } ducky_state_t;
 
 void ducky_state_init(ducky_state_t *st);

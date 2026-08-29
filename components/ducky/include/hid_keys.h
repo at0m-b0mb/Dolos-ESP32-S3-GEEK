@@ -49,5 +49,8 @@
 #define HID_KEY_MENU    0x65
 #define HID_KEY_NONUS_HASH   0x32  /* ISO key next to Enter   */
 #define HID_KEY_NONUS_BSLASH 0x64  /* ISO key next to L-Shift */
+#define HID_KEY_KP_PLUS      0x57
+#define HID_KEY_KP1          0x59  /* KP1..KP9 = 0x59..0x61 */
+#define HID_KEY_KP0          0x62
 
 #endif /* DOLOS_HID_KEYS_H */

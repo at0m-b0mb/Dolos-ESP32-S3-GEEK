@@ -162,7 +162,7 @@ static void payload_task(void *arg)
 {
     (void)arg;
     payload_ctx_t ctx = { .abort = &s_abort, .progress = on_progress, .user = NULL,
-                          .layout = s_cfg.layout, .dry_run = s_cfg.dry_run,
+                          .layout = s_cfg.layout, .os = s_cfg.os, .dry_run = s_cfg.dry_run,
                           .default_delay = s_cfg.default_delay_ms };
     s_last_lines = payload_run(s_payload, &ctx);
     s_run_done = true;

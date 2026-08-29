@@ -14,11 +14,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "layout.h"
+#include "ducky.h"   /* target_os_t */
 
 typedef enum { SPEED_FAST = 0, SPEED_BALANCED = 1, SPEED_RELIABLE = 2 } dolos_speed_t;
 
 typedef struct {
     kb_layout_t   layout;
+    target_os_t   os;             /* Unicode input-method target OS */
     dolos_speed_t speed;
     bool          dry_run;
     uint32_t      default_delay_ms;

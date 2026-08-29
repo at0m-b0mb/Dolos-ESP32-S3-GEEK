@@ -2,6 +2,25 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.4.0] - 2026-08-29
+**Type anything, anywhere** — more keyboard layouts and a Unicode input engine.
+
+### Added
+- **10 keyboard layouts**: US / UK / DE / FR / ES / **IT / PT / SE(Nordic) / CH /
+  LatAm** (`layout=…`). QWERTZ (DE/CH) and AZERTY (FR) remaps included.
+- **Unicode "type anything" mode** — `STRING café`, `STRING 日本語`, or emoji now
+  type correctly regardless of layout. Non-ASCII UTF-8 is injected via the target
+  OS's own Unicode method, selected with `os=windows|linux|mac`:
+  - Windows — Alt + numpad `+` + hex (needs `EnableHexNumpad` once)
+  - Linux — Ctrl+Shift+U + hex (IBus/GTK)
+  - macOS — Option + hex (needs "Unicode Hex Input")
+- New DuckyScript command **`UNICODE <hex>`** (accepts `U+XXXX`).
+- HID layer gained held-modifier support (`HOLD`/`KEY`/`RELEASE`) so a modifier
+  can stay down across a whole hex sequence.
+
+### Tests
+- **131 host checks** (unicode 25, incl. UTF-8 decode + per-OS sequence shape).
+
 ## [0.3.0] - 2026-08-29
 The **wireless console** — remote management over a secure link, with an
 admin-gated remote-fire that never removes the physical-consent safeguard.

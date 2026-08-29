@@ -83,7 +83,16 @@ REPEAT 3                  REM  repeat the previous command 3 more times
 **Modifiers:** `CTRL`/`CONTROL`, `ALT`, `SHIFT`, `GUI`/`WINDOWS`/`COMMAND`.
 **Named keys:** `ENTER` `ESC` `TAB` `SPACE` `BACKSPACE` `DELETE` `INSERT` `HOME` `END` `PAGEUP` `PAGEDOWN` `UP` `DOWN` `LEFT` `RIGHT` `CAPSLOCK` `MENU` `PRINTSCREEN` `F1`–`F12`.
 
-> Layout is US-QWERTY today. International keyboard-layout profiles are on the [roadmap](#-roadmap).
+**Mouse + media:** `MOUSEMOVE x y` · `MOUSECLICK L|R|M` · `MOUSEWHEEL n` · `MEDIA PLAY|NEXT|PREV|MUTE|VOLUP|VOLDOWN`.
+
+**Type anything (Unicode):** set `layout=` (US/UK/DE/FR/ES/IT/PT/SE/CH/LatAm) for the target's keyboard, and `os=windows|linux|mac` so non-ASCII text just works:
+
+```text
+STRING café → ¥ 日本語 🎯     REM  types via the OS Unicode method
+UNICODE 1F600                 REM  or a raw codepoint (U+1F600)
+```
+
+> Windows needs `EnableHexNumpad` set once; macOS needs the "Unicode Hex Input" source; Linux (IBus/GTK) works out of the box. Layouts beyond US are best-effort — verify against your target.
 
 ## 📡 Wireless console (v0.3)
 

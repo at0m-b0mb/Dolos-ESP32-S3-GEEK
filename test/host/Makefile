@@ -3,23 +3,26 @@ CC     ?= cc
 INC    := -I../../components/ducky/include -I../../components/ui/include -I../../components/dconsole/include -I.
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O1 -g $(INC)
 DUCKY  := ../../components/ducky/src
+DSRC   := $(DUCKY)/ducky.c $(DUCKY)/hid_keymap.c $(DUCKY)/layout.c $(DUCKY)/unicode.c
 BIN    := ./bin
-SUITES := test_keymap test_ducky test_dui test_layout test_config test_auth
+SUITES := test_keymap test_ducky test_dui test_layout test_config test_auth test_unicode
 
 .PHONY: all clean
 all: $(SUITES:%=run-%)
 	@echo "\nAll suites passed."
 run-%: $(BIN)/%
 	@echo "--- $< ---"; $<
-$(BIN)/test_keymap: test_keymap.c $(DUCKY)/hid_keymap.c $(DUCKY)/ducky.c $(DUCKY)/layout.c | $(BIN)
+$(BIN)/test_keymap:  test_keymap.c  $(DSRC) | $(BIN)
 	$(CC) $(CFLAGS) $^ -o $@
-$(BIN)/test_ducky:  test_ducky.c  $(DUCKY)/hid_keymap.c $(DUCKY)/ducky.c $(DUCKY)/layout.c | $(BIN)
+$(BIN)/test_ducky:   test_ducky.c   $(DSRC) | $(BIN)
 	$(CC) $(CFLAGS) $^ -o $@
-$(BIN)/test_layout: test_layout.c $(DUCKY)/layout.c $(DUCKY)/hid_keymap.c $(DUCKY)/ducky.c | $(BIN)
+$(BIN)/test_layout:  test_layout.c  $(DSRC) | $(BIN)
 	$(CC) $(CFLAGS) $^ -o $@
-$(BIN)/test_config: test_config.c $(DUCKY)/dconfig.c $(DUCKY)/layout.c $(DUCKY)/hid_keymap.c $(DUCKY)/ducky.c | $(BIN)
+$(BIN)/test_unicode: test_unicode.c $(DSRC) | $(BIN)
 	$(CC) $(CFLAGS) $^ -o $@
-$(BIN)/test_auth:   test_auth.c   ../../components/dconsole/src/auth.c | $(BIN)
+$(BIN)/test_config:  test_config.c  $(DUCKY)/dconfig.c $(DSRC) | $(BIN)
+	$(CC) $(CFLAGS) $^ -o $@
+$(BIN)/test_auth:    test_auth.c    ../../components/dconsole/src/auth.c | $(BIN)
 	$(CC) $(CFLAGS) $^ -o $@
 $(BIN):
 	@mkdir -p $(BIN)

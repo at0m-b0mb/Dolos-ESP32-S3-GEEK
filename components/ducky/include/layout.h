@@ -16,9 +16,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef enum { LAYOUT_US = 0, LAYOUT_UK, LAYOUT_DE, LAYOUT_FR, LAYOUT_ES, LAYOUT__COUNT } kb_layout_t;
+typedef enum {
+    LAYOUT_US = 0, LAYOUT_UK, LAYOUT_DE, LAYOUT_FR, LAYOUT_ES,
+    LAYOUT_IT, LAYOUT_PT, LAYOUT_SE, LAYOUT_CH, LAYOUT_LATAM,
+    LAYOUT__COUNT
+} kb_layout_t;
 
-kb_layout_t layout_from_name(const char *name);   /* "us","uk","de","fr","es" */
+kb_layout_t layout_from_name(const char *name);   /* us,uk,de,fr,es,it,pt,se,ch,latam */
 const char *layout_name(kb_layout_t l);
 
 /* ASCII -> (scan code, modifier bits) for the given layout. false if unmapped. */

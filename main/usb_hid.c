@@ -100,6 +100,29 @@ void usb_hid_tap(uint8_t mods, uint8_t key)
     vTaskDelay(pdMS_TO_TICKS(s_half_delay));
 }
 
+void usb_hid_hold(uint8_t mods)
+{
+    wait_ready();
+    tud_hid_keyboard_report(RID_KEYBOARD, mods, NULL);
+    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+}
+void usb_hid_key(uint8_t tap_mods, uint8_t held_after, uint8_t key)
+{
+    uint8_t keys[6] = { key, 0, 0, 0, 0, 0 };
+    wait_ready();
+    tud_hid_keyboard_report(RID_KEYBOARD, tap_mods, key ? keys : NULL);
+    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+    wait_ready();
+    tud_hid_keyboard_report(RID_KEYBOARD, held_after, NULL);  /* keep held mods down */
+    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+}
+void usb_hid_release(void)
+{
+    wait_ready();
+    tud_hid_keyboard_report(RID_KEYBOARD, 0, NULL);
+    vTaskDelay(pdMS_TO_TICKS(s_half_delay));
+}
+
 void usb_hid_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel)
 {
     wait_ready();

@@ -1,4 +1,5 @@
 #include "dconfig.h"
+#include "unicode.h"   /* os_from_name */
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -6,6 +7,7 @@
 void config_defaults(dolos_config_t *c)
 {
     c->layout = LAYOUT_US;
+    c->os = OS_WINDOWS;
     c->speed = SPEED_BALANCED;
     c->dry_run = false;
     c->default_delay_ms = 0;
@@ -60,6 +62,7 @@ void config_parse(const char *text, dolos_config_t *c)
         char *ve = val + strlen(val); while (ve > val && (ve[-1]==' '||ve[-1]=='\t'||ve[-1]=='\r')) *--ve = 0;
 
         if      (ieq(key, "layout")) c->layout = layout_from_name(val);
+        else if (ieq(key, "os") || ieq(key, "target_os")) c->os = os_from_name(val);
         else if (ieq(key, "speed")) {
             if (ieq(val, "fast")) c->speed = SPEED_FAST;
             else if (ieq(val, "reliable")) c->speed = SPEED_RELIABLE;

@@ -10,12 +10,14 @@
 #define DOLOS_PAYLOAD_H
 #include <stdbool.h>
 #include "layout.h"
+#include "ducky.h"   /* target_os_t */
 
 typedef struct {
     volatile bool *abort;                                   /* set to stop mid-run */
     void (*progress)(int cur_line, int total_lines, void *user);
     void *user;
     kb_layout_t layout;         /* target keyboard layout            */
+    target_os_t os;             /* OS for Unicode "type anything"     */
     bool        dry_run;        /* preview only - never send a key    */
     uint32_t    default_delay;  /* ms between commands (config)       */
 } payload_ctx_t;

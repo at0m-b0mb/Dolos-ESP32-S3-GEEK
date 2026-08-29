@@ -1,6 +1,7 @@
 #include "ducky.h"
 #include "hid_keys.h"
 #include "layout.h"
+#include "unicode.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -35,6 +36,7 @@ void ducky_state_init(ducky_state_t *st)
     st->last_cmd[0] = 0;
     st->repeat = 0;
     st->layout = LAYOUT_US;
+    st->target_os = OS_WINDOWS;
 }
 
 static int kw(const char *tok, const char *word)  /* case-insensitive equals */
@@ -45,14 +47,23 @@ static int kw(const char *tok, const char *word)  /* case-insensitive equals */
 }
 
 /* Emit one KEY action per character of `s`. Returns count (<= max). */
-static int emit_string(const char *s, kb_layout_t layout, ducky_action_t *out, int max)
+static int emit_string(const char *s, kb_layout_t layout, target_os_t os,
+                       ducky_action_t *out, int max)
 {
-    int n = 0;
-    for (; *s && n < max; s++) {
-        uint8_t k, m;
-        if (!hid_from_ascii_layout(*s, layout, &k, &m)) continue;  /* skip unmapped */
-        out[n].kind = DUCKY_KEY; out[n].key = k; out[n].mods = m; out[n].delay_ms = 0;
-        n++;
+    int n = 0; const char *p = s;
+    while (n < max) {
+        uint32_t cp; int adv = utf8_next(&p, &cp);
+        if (adv == 0) break;
+        if (cp < 0x80) {                       /* ASCII: use the target layout */
+            uint8_t k, m;
+            if (!hid_from_ascii_layout((char)cp, layout, &k, &m)) continue;
+            memset(&out[n], 0, sizeof(out[n]));
+            out[n].kind = DUCKY_KEY; out[n].key = k; out[n].mods = m; n++;
+        } else {                               /* non-ASCII: OS Unicode method */
+            int adds = unicode_seq(cp, os, out + n, max - n);
+            if (adds == 0) break;
+            n += adds;
+        }
     }
     return n;
 }
@@ -96,9 +107,15 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         out[0].key = 0; out[0].mods = 0;
         return 1;
     }
-    if (kw(cmd, "STRING"))   return emit_string(rest, st->layout, out, max);
+    if (kw(cmd, "UNICODE")) {
+        const char *h = rest;
+        if ((h[0] == 'U' || h[0] == 'u') && h[1] == '+') h += 2;
+        uint32_t cp = (uint32_t)strtoul(h, NULL, 16);
+        return cp ? unicode_seq(cp, st->target_os, out, max) : 0;
+    }
+    if (kw(cmd, "STRING"))   return emit_string(rest, st->layout, st->target_os, out, max);
     if (kw(cmd, "STRINGLN")) {
-        int k = emit_string(rest, st->layout, out, max);
+        int k = emit_string(rest, st->layout, st->target_os, out, max);
         if (k < max) { out[k].kind = DUCKY_KEY; out[k].key = HID_KEY_ENTER;
                        out[k].mods = 0; out[k].delay_ms = 0; k++; }
         return k;
