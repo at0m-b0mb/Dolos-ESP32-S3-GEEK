@@ -1,0 +1,75 @@
+name: pages
+
+# Publishes the browser flasher to GitHub Pages and puts the release firmware
+# next to it (same-origin, so the browser can fetch it - release assets carry no
+# CORS header). Nothing binary is committed to git.
+
+on:
+  workflow_run:
+    workflows: [ "release" ]
+    types: [ completed ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.1.0). Blank = newest."
+        required: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve tag
+        id: vars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          [ -n "$TAG" ] || TAG="${{ github.event.workflow_run.head_branch }}"
+          case "$TAG" in
+            v*) ;;
+            *)  TAG=$(gh release view --repo "${{ github.repository }}" --json tagName --jq .tagName) ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Assemble the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eo pipefail
+          TAG="${{ steps.vars.outputs.tag }}"
+          mkdir -p _site/firmware
+          cp docs/flasher/index.html    _site/index.html
+          cp docs/flasher/manifest.json _site/manifest.json
+          deadline=$(( SECONDS + 900 ))
+          until gh release view "$TAG" --repo "${{ github.repository }}" \
+                  --json assets --jq '.assets[].name' 2>/dev/null \
+                | grep -qx -- "dolos-${TAG}-esp32s3.bin"; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::dolos-${TAG}-esp32s3.bin missing on release $TAG"; exit 1
+            fi
+            echo "waiting for the firmware asset on $TAG ..."; sleep 20
+          done
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "dolos-${TAG}-esp32s3.bin" \
+            --output _site/firmware/dolos-esp32s3.bin --clobber
+          size=$(stat -c%s _site/firmware/dolos-esp32s3.bin)
+          if [ "$size" -lt 200000 ]; then echo "::error::firmware truncated (${size}b)"; exit 1; fi
+          VER="${TAG#v}"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VER}\"/" _site/manifest.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

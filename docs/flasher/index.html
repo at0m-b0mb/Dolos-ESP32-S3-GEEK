@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flash Dolos · USB-HID payload runner</title>
+<meta name="description" content="Flash Dolos, a safety-gated USB-HID (BadUSB) payload runner for authorized security testing, to a Waveshare ESP32-S3-GEEK from your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='9' width='24' height='16' rx='3' fill='%23e6465a'/%3E%3Cg fill='%23140810'%3E%3Ccircle cx='10' cy='15' r='1.5'/%3E%3Ccircle cx='16' cy='15' r='1.5'/%3E%3Ccircle cx='22' cy='15' r='1.5'/%3E%3Crect x='11' y='19' width='10' height='2' rx='1'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root{
+    --void:#0a0810; --field:#170f18; --field2:#1e131e; --rim:#3a2130;
+    --accent:#e6465a; --accent-hi:#ff8a98; --amber:#f0b43c; --green:#3cc882;
+    --red:#f05050; --text:#efe6ee; --dim:#a98fa4; --dimmer:#7a6070;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(120% 90% at 50% -10%, #40121f 0%, #1a0e18 45%, #0a0810 100%) fixed;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55; min-height:100vh;
+  }
+  .wrap{max-width:780px;margin:0 auto;padding:48px 22px 72px}
+  header{text-align:center;margin-bottom:8px}
+  .mark{width:120px;height:120px;margin:0 auto 6px;display:block;filter:drop-shadow(0 6px 24px rgba(230,70,90,.30))}
+  h1{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;letter-spacing:.18em;
+     font-size:2.6rem;margin:.1em 0 .05em}
+  .tagline{color:var(--dim);font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.20em;
+     text-transform:uppercase;font-size:.72rem;margin:0}
+  .rx{display:inline-flex;align-items:center;gap:.5em;margin-top:14px;padding:.35em .9em;
+     border:1px solid #4a2131;border-radius:999px;background:#240c16;color:var(--accent-hi);
+     font-size:.82rem;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .rx .d{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+
+  .card{background:linear-gradient(180deg,#1e131e 0%,#170f18 100%);
+     border:1px solid #331c2a;border-radius:18px;padding:26px 24px;margin:26px 0;
+     box-shadow:0 10px 40px rgba(0,0,0,.4)}
+
+  .flash{text-align:center}
+  .flash h2{margin:.1em 0 .2em;font-size:1.25rem}
+  .flash p{color:var(--dim);margin:.2em auto 1.1em;max-width:48ch}
+  .gate{display:flex;align-items:flex-start;gap:.7em;text-align:left;max-width:52ch;margin:0 auto 18px;
+     background:#241009;border:1px solid #5a3418;border-radius:12px;padding:14px 16px}
+  .gate input{margin-top:.28em;width:18px;height:18px;accent-color:var(--accent);flex:0 0 auto}
+  .gate label{color:#f0d6b0;font-size:.9rem}
+  esp-web-install-button{--esp-tools-button-color:#140406;--esp-tools-button-text-color:#ffe9ec}
+  .btnwrap{opacity:.4;pointer-events:none;transition:opacity .2s ease}
+  .btnwrap.on{opacity:1;pointer-events:auto}
+  .btn{display:inline-flex;align-items:center;gap:.6em;cursor:pointer;
+     background:linear-gradient(180deg,var(--accent) 0%,#b52640 100%);color:#fff;
+     font-weight:700;font-size:1.02rem;border:0;border-radius:12px;padding:.85em 1.6em;
+     box-shadow:0 6px 22px rgba(230,70,90,.35);transition:transform .08s ease}
+  .btn:hover{transform:translateY(-1px)}
+  .unsupported{display:none;color:var(--amber);font-size:.9rem;margin-top:12px}
+  .browsers{color:var(--dimmer);font-size:.8rem;margin-top:14px}
+
+  .notice{border-left:3px solid var(--amber);background:#211708;padding:14px 16px;border-radius:10px;
+     margin:18px 0;color:#f0d9b0;font-size:.92rem}
+  .notice b{color:var(--amber)}
+  .fence{border-left:3px solid var(--green);background:#0c2418;padding:14px 16px;border-radius:10px;
+     margin:18px 0;color:#bfead2;font-size:.92rem}
+  .fence b{color:var(--green)}
+
+  h3{font-size:1.02rem;margin:0 0 .5em;letter-spacing:.02em}
+  ol{margin:.2em 0 0;padding-left:1.3em}
+  ol li{margin:.4em 0}
+  ol li span{color:var(--dim)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+  .spec{background:#160b12;border:1px solid #331c2a;border-radius:10px;padding:12px 14px}
+  .spec .k{color:var(--dimmer);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em}
+  .spec .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92rem}
+  .rowset{display:grid;grid-template-columns:1fr;gap:8px;margin-top:6px}
+  .drow{display:flex;align-items:center;gap:10px;background:#160b12;border:1px solid #331c2a;
+     border-radius:10px;padding:9px 12px;font-size:.92rem}
+  .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  code{background:#120609;border:1px solid #331c2a;border-radius:6px;padding:.12em .45em;
+     font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.86em;color:var(--accent-hi)}
+  a{color:var(--accent-hi)}
+  footer{text-align:center;color:var(--dimmer);font-size:.82rem;margin-top:34px}
+  .links{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg class="mark" viewBox="0 0 120 120" aria-hidden="true">
+      <defs>
+        <linearGradient id="kb" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ff5c72"/><stop offset="1" stop-color="#b52640"/>
+        </linearGradient>
+      </defs>
+      <circle cx="60" cy="60" r="58" fill="#1a0e16" stroke="#331c2a" stroke-width="1.5"/>
+      <rect x="26" y="40" width="68" height="40" rx="7" fill="url(#kb)"/>
+      <g fill="#160810">
+        <circle cx="40" cy="54" r="3.4"/><circle cx="54" cy="54" r="3.4"/>
+        <circle cx="68" cy="54" r="3.4"/><circle cx="82" cy="54" r="3.4"/>
+        <rect x="42" y="66" width="36" height="6" rx="3"/>
+      </g>
+    </svg>
+    <h1>DOLOS</h1>
+    <p class="tagline">USB-HID&nbsp;Payload&nbsp;Runner</p>
+    <div class="rx"><span class="d"></span>boots SAFE · never types until you arm it by hand</div>
+  </header>
+
+  <div class="card flash">
+    <h2>Flash it from your browser</h2>
+    <p>Plug the ESP32-S3-GEEK into a USB port, confirm authorized use, click install, and pick the serial port. No toolchain, no drivers.</p>
+
+    <div class="gate">
+      <input type="checkbox" id="auth">
+      <label for="auth">I confirm I will only use Dolos on systems I own or am <b>explicitly authorized</b> to test, and that unauthorized keystroke injection is illegal.</label>
+    </div>
+
+    <div class="btnwrap" id="btnwrap">
+      <esp-web-install-button manifest="./manifest.json">
+        <button slot="activate" class="btn">⚡ Install Dolos</button>
+        <span slot="unsupported" class="unsupported">
+          Your browser can't talk to USB serial. Open this page in <b>Chrome</b> or <b>Edge</b> on a desktop.
+        </span>
+        <span slot="not-allowed" class="unsupported">
+          This page must be served over HTTPS to flash. Use the hosted link.
+        </span>
+      </esp-web-install-button>
+    </div>
+
+    <div class="browsers">Needs a Chromium browser (Chrome / Edge / Opera) on desktop — Web Serial isn't in Safari or Firefox.</div>
+  </div>
+
+  <div class="notice">
+    <b>⚖️ Authorized security testing only.</b> Dolos emulates a USB keyboard. Using it to inject
+    keystrokes into a computer you do not own or have written permission to test is illegal in most
+    jurisdictions (e.g. computer-misuse / unauthorized-access laws). You are responsible for how you
+    use it. Read the <a href="https://github.com/at0m-b0mb/Dolos-ESP32-S3-GEEK#-ethics--legal">ethics &amp; legal notes</a> first.
+  </div>
+
+  <div class="fence">
+    <b>Why it won't fire by accident.</b> Dolos boots <b>SAFE</b> and sends nothing. Firing takes two
+    deliberate holds of the BOOT button at the device (SAFE → ARMED → 3-2-1 countdown → run), and a tap
+    aborts at any stage. Hold BOOT while plugging in for <b>FLASH MODE</b>, where USB-HID never starts
+    at all. The payload is plain text you can read on the SD card.
+  </div>
+
+  <div class="card">
+    <h3>What it does</h3>
+    <div class="rowset">
+      <div class="drow"><span class="dot" style="background:#e6465a"></span>DuckyScript-style payloads <span style="color:var(--dim)">— STRING, DELAY, GUI/CTRL/ALT combos, F-keys, REPEAT</span></div>
+      <div class="drow"><span class="dot" style="background:#f0b43c"></span>On-screen mission control <span style="color:var(--dim)">— SAFE / ARMED / countdown / live line progress</span></div>
+      <div class="drow"><span class="dot" style="background:#3cc882"></span>Payloads from microSD <span style="color:var(--dim)">— drop a PAYLOAD.TXT you can inspect</span></div>
+      <div class="drow"><span class="dot" style="background:#5aa0ff"></span>Two-stage arming + abort <span style="color:var(--dim)">— nothing types until you decide</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>What you need</h3>
+    <div class="grid">
+      <div class="spec"><div class="k">Board</div><div class="v">Waveshare ESP32-S3-GEEK</div></div>
+      <div class="spec"><div class="k">Port</div><div class="v">USB-A (the GEEK's own plug), data-capable</div></div>
+      <div class="spec"><div class="k">Browser</div><div class="v">Chrome / Edge, desktop</div></div>
+      <div class="spec"><div class="k">Image</div><div class="v">single file, flashed at 0x0</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Steps</h3>
+    <ol>
+      <li>Plug the GEEK into a USB-A port. <span>USB-C-only laptop? Use an A-to-C adapter.</span></li>
+      <li>Tick the authorization box, click <b>Install Dolos</b>, choose the serial port. <span>(If none appears, hold BOOT while plugging in.)</span></li>
+      <li>Let it erase and write — about a minute.</li>
+      <li>It reboots into Dolos <b>SAFE</b>. It will not type until you arm it by hand.</li>
+    </ol>
+  </div>
+
+  <footer>
+    <div class="links">
+      <a href="https://github.com/at0m-b0mb/Dolos-ESP32-S3-GEEK">Source</a>
+      <a href="https://github.com/at0m-b0mb/Dolos-ESP32-S3-GEEK/releases">Releases</a>
+      <a href="https://github.com/at0m-b0mb/Dolos-ESP32-S3-GEEK#readme">Docs</a>
+    </div>
+    <div>Flashing runs entirely in your browser over Web Serial — nothing is uploaded anywhere.</div>
+    <div>MIT © at0m-b0mb · for authorized security professionals</div>
+  </footer>
+</div>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+<script>
+  // Authorization gate: the install button is inert until the box is ticked.
+  const cb = document.getElementById('auth');
+  const bw = document.getElementById('btnwrap');
+  cb.addEventListener('change', () => bw.classList.toggle('on', cb.checked));
+</script>
+</body>
+</html>

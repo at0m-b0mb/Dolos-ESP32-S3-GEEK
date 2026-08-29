@@ -1,0 +1,22 @@
+# Dolos build defaults - Waveshare ESP32-S3-GEEK (ESP32-S3, 16MB flash, 2MB PSRAM)
+CONFIG_IDF_TARGET="esp32s3"
+
+# flash
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# 2MB quad PSRAM (framebuffer lives here)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# USB: TinyUSB in device mode, HID class only. This is what makes the board a
+# keyboard. It boots SAFE and only sends reports after the operator arms it.
+CONFIG_TINYUSB_HID_COUNT=1
+CONFIG_TINYUSB_CDC_ENABLED=n
+
+# Console stays on USB-Serial/JTAG for boot logs (until HID takes the USB pins).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="Dolos - USB-HID payload runner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a0e16"/>
+      <stop offset="55" stop-color="#120810"/>
+      <stop offset="1" stop-color="#0a0810"/>
+    </linearGradient>
+    <linearGradient id="kb" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5c72"/>
+      <stop offset="1" stop-color="#b52640"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0" stop-color="#e6465a" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#e6465a" stop-opacity="0"/>
+    </radialGradient>
+    <style>
+      .wm{font-family:'DejaVu Sans Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;font-weight:700}
+      .tg{font-family:'DejaVu Sans Mono',ui-monospace,Menlo,Consolas,monospace;font-weight:400}
+    </style>
+  </defs>
+
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <rect width="1200" height="300" fill="url(#glow)"/>
+  <!-- scanline texture -->
+  <g stroke="#e6465a" stroke-opacity="0.05" stroke-width="1">
+    <line x1="0" y1="60" x2="1200" y2="60"/><line x1="0" y1="120" x2="1200" y2="120"/>
+    <line x1="0" y1="180" x2="1200" y2="180"/><line x1="0" y1="240" x2="1200" y2="240"/>
+  </g>
+  <rect x="0" y="0" width="1200" height="4" fill="#e6465a"/>
+  <rect x="0" y="296" width="1200" height="4" fill="#e6465a" fill-opacity="0.5"/>
+
+  <!-- keyboard emblem -->
+  <g transform="translate(120,150)">
+    <circle r="86" fill="#160810" stroke="#3a2130" stroke-width="2"/>
+    <rect x="-58" y="-30" width="116" height="66" rx="12" fill="url(#kb)"/>
+    <g fill="#160810">
+      <circle cx="-36" cy="-8" r="5.5"/><circle cx="-12" cy="-8" r="5.5"/>
+      <circle cx="12" cy="-8" r="5.5"/><circle cx="36" cy="-8" r="5.5"/>
+      <rect x="-30" y="12" width="60" height="10" rx="5"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <text class="wm" x="250" y="150" font-size="96" fill="#efe6ee" letter-spacing="10">DOLOS</text>
+  <text class="tg" x="256" y="196" font-size="23" fill="#a98fa4" letter-spacing="7">USB-HID PAYLOAD RUNNER · ESP32-S3-GEEK</text>
+
+  <!-- status chips -->
+  <g transform="translate(258,224)">
+    <rect x="0" y="0" width="196" height="30" rx="15" fill="#240c16" stroke="#4a2131"/>
+    <circle cx="20" cy="15" r="5" fill="#e6465a"/>
+    <text class="tg" x="34" y="20" font-size="14" fill="#ff8a98" letter-spacing="1">BOOTS SAFE · GATED</text>
+    <rect x="212" y="0" width="230" height="30" rx="15" fill="#111a10" stroke="#274a21"/>
+    <circle cx="232" cy="15" r="5" fill="#3cc882"/>
+    <text class="tg" x="246" y="20" font-size="14" fill="#8fe0b0" letter-spacing="1">AUTHORIZED TESTING ONLY</text>
+  </g>
+</svg>

@@ -1,0 +1,15 @@
+name: host-tests
+
+# The DuckyScript engine + keymap + UI are pure C with no ESP-IDF dependency, so
+# CI compiles and runs the whole suite on a plain Ubuntu box in seconds.
+on:
+  push:
+  pull_request:
+
+jobs:
+  engine-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run engine + UI unit tests
+        run: make -C test/host

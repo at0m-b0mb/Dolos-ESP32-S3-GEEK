@@ -1,0 +1,92 @@
+name: release
+
+# Builds the ESP32-S3 firmware on every version tag and attaches a flashable
+# binary to the GitHub release: a single merged image that flashes at 0x0, plus
+# the component images for anyone who prefers explicit offsets.
+
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: vars
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.tag }}
+
+      - name: Host unit tests gate
+        run: make -C test/host
+
+      - name: Build for ESP32-S3
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5
+          target: esp32s3
+          path: '.'
+
+      - name: Assemble a flashable bundle
+        run: |
+          set -eo pipefail
+          TAG="${{ steps.vars.outputs.tag }}"
+          python -m pip install --quiet "esptool~=4.8"
+          DIST="$PWD/dist"; mkdir -p "$DIST"
+          ( cd build && python -m esptool --chip esp32s3 merge_bin \
+              -o "$DIST/dolos-${TAG}-esp32s3.bin" @flash_args )
+          cp build/bootloader/bootloader.bin            "$DIST/"
+          cp build/partition_table/partition-table.bin  "$DIST/"
+          cp build/dolos.bin                            "$DIST/dolos-app.bin"
+          cp "$DIST/dolos-${TAG}-esp32s3.bin"           "$DIST/dolos-esp32s3.bin"
+          cat > dist/FLASH.md <<EOF2
+          # Flashing Dolos ${TAG} to a Waveshare ESP32-S3-GEEK
+
+          Easiest: the browser flasher — https://at0m-b0mb.github.io/Dolos-ESP32-S3-GEEK/
+
+          Single-file image with esptool:
+
+              esptool.py --chip esp32s3 write_flash 0x0 dolos-${TAG}-esp32s3.bin
+
+          Dolos boots SAFE and never types until armed by hand. Hold BOOT while
+          plugging in for FLASH MODE (stays serial; safe to re-flash).
+          EOF2
+          sha256sum dist/* > "dist/SHA256SUMS.txt"
+          ( cd dist && zip -q "dolos-${TAG}-esp32s3.zip" \
+              "dolos-${TAG}-esp32s3.bin" bootloader.bin partition-table.bin \
+              dolos-app.bin FLASH.md SHA256SUMS.txt )
+          ls -l dist
+
+      - name: Attach binaries to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eo pipefail
+          TAG="${{ steps.vars.outputs.tag }}"
+          deadline=$(( SECONDS + 600 ))
+          until gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              gh release create "$TAG" --repo "${{ github.repository }}" \
+                --title "Dolos $TAG" --notes "Automated release. Firmware built in CI." || true
+              break
+            fi
+            echo "waiting for release $TAG ..."; sleep 20
+          done
+          gh release upload "$TAG" \
+            "dist/dolos-${TAG}-esp32s3.bin" \
+            "dist/dolos-esp32s3.bin" \
+            "dist/dolos-${TAG}-esp32s3.zip" \
+            "dist/SHA256SUMS.txt" \
+            --clobber --repo "${{ github.repository }}"
