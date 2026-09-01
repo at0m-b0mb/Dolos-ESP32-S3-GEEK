@@ -31,6 +31,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Parse buffers are kilobytes each, and internal RAM on this chip is what
+ * Wi-Fi, TinyUSB and the HTTP server compete for - spending it here is what
+ * crashed the device earlier in this project. On the ESP32 they live in PSRAM;
+ * on a host they are ordinary statics. */
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#define DOLOS_BIG_BSS EXT_RAM_BSS_ATTR
+#else
+#define DOLOS_BIG_BSS
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,7 +58,7 @@ extern "C" {
  * still stopping a loop with no exit. A payload that means to run for ever
  * (a menu, a prank) is aborted at the device instead. */
 #define DS_MAX_STEPS 1000000
-#define DS_LINE_MAX   2048   /* matches the player's line buffer          */
+#define DS_LINE_MAX   8192   /* matches the player's line buffer          */
 
 typedef struct {
     const char *text;
@@ -67,10 +78,14 @@ typedef struct {
     uint8_t ndefs;
     uint8_t nvars;
 
-    struct { char name[20]; uint16_t line; } fn[DS_MAX_FUNCS];
+    struct { char name[DS_DEF_NAME]; uint16_t line; } fn[DS_MAX_FUNCS];
     uint8_t nfns;
 
     uint16_t ret[DS_MAX_DEPTH];  uint8_t nret;    /* return addresses      */
+    /* Where a function's RETURN value should be stored, per call frame.
+     * "$X = FUNC()" is how the official payloads capture a result; the call
+     * runs as a normal statement and RETURN assigns into this. */
+    char     ret_var[DS_MAX_DEPTH][DS_DEF_NAME];
     uint16_t loop[DS_MAX_DEPTH]; uint8_t nloop;   /* WHILE line numbers    */
 
     uint8_t  block;        /* inside STRING/END_STRING (1) or STRINGLN (2)   */
@@ -91,7 +106,8 @@ typedef struct {
     uint32_t steps;
     /* +16: a block line is handed back with a "STRINGLN " prefix, so the
      * output is legitimately longer than the input line it came from. */
-    char     out[DS_LINE_MAX + 16];         /* expanded line handed to the caller */
+    char     out[DS_LINE_MAX + 16];
+    char     work[DS_LINE_MAX];        /* line scratch - NOT on the stack */         /* expanded line handed to the caller */
     const char *err;                   /* non-NULL once the script is broken */
     /* Big enough for the longest message plus a full-length name, so an
      * error can always say WHICH thing it is about. */

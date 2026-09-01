@@ -189,7 +189,7 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
  * no delays, and the same step limit that bounds a runaway payload. */
 static int count_exec_lines(const char *text)
 {
-    static dscript_t probe;          /* static: 4 KB is too much for the stack */
+    static DOLOS_BIG_BSS dscript_t probe;          /* static: 4 KB is too much for the stack */
     if (!dscript_init(&probe, text)) return 0;
     int n = 0;
     while (dscript_next(&probe) != NULL) n++;
@@ -227,7 +227,9 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
     ilog_note("  leds at start: 0x%02X (num=%d caps=%d)\n", usb_hid_leds(),
               (usb_hid_leds() & 0x01) ? 1 : 0, (usb_hid_leds() & 0x02) ? 1 : 0);
 
-    ducky_state_t st; ducky_state_init(&st);
+    /* static: ducky_state_t now carries an 8 KB scratch buffer, and one
+     * payload runs at a time. */
+    static DOLOS_BIG_BSS ducky_state_t st; ducky_state_init(&st);
     st.rng_state = esp_random();      /* RANDOM_* differs every run */
     st.layout = ctx->layout;
     st.target_os = ctx->os;
@@ -238,7 +240,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
      * FUNCTION itself and hands back only the lines that type something, with
      * $variables already substituted. Everything below is unchanged - the
      * player never learned the language. */
-    static dscript_t ds;
+    static DOLOS_BIG_BSS dscript_t ds;
     if (!dscript_init(&ds, text)) {
         ESP_LOGE(TAG, "payload rejected: %s (line %u)",
                  dscript_error(&ds), dscript_error_line(&ds));
@@ -259,7 +261,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
         ilog_note("  line %d: \"%s\" -> %d action(s)\n", cur, line, n);
 
         if (st.repeat > 0) {
-            char saved[2048];
+            char saved[512];
             strncpy(saved, st.last_cmd, sizeof(saved) - 1); saved[sizeof(saved) - 1] = 0;
             int reps = st.repeat;
             for (int r = 0; r < reps && !(ctx->abort && *ctx->abort); r++) {

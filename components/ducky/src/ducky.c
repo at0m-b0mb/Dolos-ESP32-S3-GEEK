@@ -154,10 +154,10 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
     if (!line || max <= 0) return 0;
 
     /* trim leading whitespace + trailing CR/LF into a working buffer */
-    char buf[2048];
+    char *buf = st->scratch;
     while (*line == ' ' || *line == '\t') line++;
     size_t n = 0;
-    while (line[n] && line[n] != '\r' && line[n] != '\n' && n < sizeof(buf) - 1) {
+    while (line[n] && line[n] != '\r' && line[n] != '\n' && n < 8191) {
         buf[n] = line[n]; n++;
     }
     buf[n] = 0;

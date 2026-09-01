@@ -477,7 +477,7 @@ bool dscript_init(dscript_t *ds, const char *text)
         const char *name = skip_ws(l + 8);
         if (!*name) { ds->err = "FUNCTION needs a name"; ds->err_line = i + 1; return false; }
         if (ds->nfns >= DS_MAX_FUNCS) { ds->err = "too many functions"; ds->err_line = i + 1; return false; }
-        char nm[20]; size_t n = 0;
+        char nm[DS_DEF_NAME]; size_t n = 0;
         while (name[n] && name[n] != ' ' && name[n] != '(' && n < sizeof(nm) - 1) { nm[n] = name[n]; n++; }
         nm[n] = 0;
         snprintf(ds->fn[ds->nfns].name, sizeof(ds->fn[ds->nfns].name), "%s", nm);
@@ -544,21 +544,20 @@ static void expand_vars(dscript_t *ds, const char *in, char *out, size_t cap)
 
 const char *dscript_next(dscript_t *ds)
 {
-    char buf[DS_LINE_MAX];
+    char *buf = ds->work;   /* in the struct: 8 KB has no business on a task stack */
 
     while (!ds->err && ds->pc < ds->nlines) {
         if (++ds->steps > DS_MAX_STEPS) { fail(ds, "payload ran too long (loop with no end?)"); return NULL; }
 
         uint16_t here = ds->pc;
-        get_line(ds, here, buf, sizeof(buf));
+        get_line(ds, here, buf, DS_LINE_MAX);
         /* Macro expansion first, so everything below - conditions, delays,
          * text to type - sees the substituted text, exactly as the Ducky
          * toolchain would have produced it at compile time. */
         if (ds->ndefs) {
-            char ex[DS_LINE_MAX];
-            expand_defines(ds, buf, ex, sizeof(ex));
-            memcpy(buf, ex, sizeof(buf) < sizeof(ex) ? sizeof(buf) : sizeof(ex));
-            buf[sizeof(buf) - 1] = 0;
+            expand_defines(ds, buf, ds->out, sizeof(ds->out));
+            memcpy(buf, ds->out, DS_LINE_MAX);
+            buf[DS_LINE_MAX - 1] = 0;
         }
         const char *l = skip_ws(buf);
         ds->pc++;
@@ -711,6 +710,29 @@ const char *dscript_next(dscript_t *ds)
             name[n] = 0;
             const char *after = skip_ws(r);
             if (*after == '=' && after[1] != '=') {
+                /* If the right-hand side is a call to a function this payload
+                 * defines, run it as a statement and let its RETURN assign the
+                 * result. That is the shape the official payloads use, and it
+                 * avoids evaluating a function inside an expression - which
+                 * would mean running code, possibly typing, mid-expression. */
+                const char *rhs = skip_ws(after + 1);
+                char cn[DS_DEF_NAME]; size_t cnl = 0;
+                const char *cq = rhs;
+                while ((isalnum((unsigned char)*cq) || *cq == '_') && cnl < sizeof(cn) - 1) cn[cnl++] = *cq++;
+                cn[cnl] = 0;
+                const char *ctail = skip_ws(cq);
+                if (cnl && ctail[0] == '(' && ctail[1] == ')') {
+                    int fi = -1;
+                    for (int i = 0; i < ds->nfns; i++) if (ieq(ds->fn[i].name, cn)) { fi = i; break; }
+                    if (fi >= 0) {
+                        if (ds->nret >= DS_MAX_DEPTH) { fail(ds, "functions nested too deeply"); return NULL; }
+                        /* remember WHERE the result goes, then call */
+                        snprintf(ds->ret_var[ds->nret], DS_DEF_NAME, "%s", name);
+                        ds->ret[ds->nret++] = ds->pc;
+                        ds->pc = (uint16_t)(ds->fn[fi].line + 1);
+                        continue;
+                    }
+                }
                 int32_t v = eval(ds, after + 1);
                 if (!ds->err) var_set(ds, name, v);
                 continue;
@@ -774,11 +796,21 @@ const char *dscript_next(dscript_t *ds)
         }
         if (starts_with_kw(l, "END_FUNCTION") || starts_with_kw(l, "RETURN")) {
             if (ds->nret == 0) { ds->pc = ds->nlines; return NULL; }   /* RETURN at top level ends the payload */
-            ds->pc = ds->ret[--ds->nret];
+            /* "RETURN <expr>" hands a value back to "$X = FUNC()". */
+            if (starts_with_kw(l, "RETURN")) {
+                const char *r = skip_ws(l + 6);
+                if (*r && ds->ret_var[ds->nret - 1][0]) {
+                    int32_t v = eval(ds, r);
+                    if (!ds->err) var_set(ds, ds->ret_var[ds->nret - 1], v);
+                }
+            }
+            ds->nret--;
+            ds->ret_var[ds->nret][0] = 0;
+            ds->pc = ds->ret[ds->nret];
             continue;
         }
         {   /* a bare name that matches a FUNCTION is a call */
-            char nm[20]; size_t n = 0;
+            char nm[DS_DEF_NAME]; size_t n = 0;
             const char *q = l;
             while (*q && *q != ' ' && *q != '(' && n < sizeof(nm) - 1) nm[n++] = *q++;
             nm[n] = 0;
@@ -787,6 +819,7 @@ const char *dscript_next(dscript_t *ds)
                 for (int i = 0; i < ds->nfns; i++) {
                     if (!ieq(ds->fn[i].name, nm)) continue;
                     if (ds->nret >= DS_MAX_DEPTH) { fail(ds, "functions nested too deeply"); return NULL; }
+                    ds->ret_var[ds->nret][0] = 0;
                     ds->ret[ds->nret++] = ds->pc;
                     ds->pc = (uint16_t)(ds->fn[i].line + 1);
                     goto continue_outer;

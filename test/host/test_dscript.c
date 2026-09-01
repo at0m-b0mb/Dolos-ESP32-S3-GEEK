@@ -236,4 +236,49 @@ TEST_MAIN_BEGIN
         while (dscript_next(&d2)) {}
         CHECK(dscript_error(&d2) == NULL, "unset $_ variables are zero, not errors");
     }
+
+    SUITE("dscript: a function can return a value into a variable");
+    {
+        /* "$X = FUNC()" is how the official payloads capture a result. The call
+         * runs as an ordinary statement - so anything it types still gets typed
+         * - and RETURN assigns into the waiting variable. */
+        static dscript_t d;
+        dscript_init(&d,
+            "FUNCTION GET_VAL()\n"
+            "    VAR $tmp = 7\n"
+            "    RETURN $tmp\n"
+            "END_FUNCTION\n"
+            "VAR $HEX = 0\n"
+            "$HEX = GET_VAL()\n");
+        while (dscript_next(&d)) {}
+        int32_t v = -1;
+        CHECK(dscript_error(&d) == NULL, "no error: %s", dscript_error(&d) ? dscript_error(&d) : "");
+        CHECK(dscript_get(&d, "HEX", &v) && v == 7, "the returned value was stored, got %ld", (long)v);
+
+        /* a function that types still types when called this way */
+        static dscript_t d2;
+        dscript_init(&d2,
+            "FUNCTION SAY()\n"
+            "    STRING hi\n"
+            "    RETURN 3\n"
+            "END_FUNCTION\n"
+            "VAR $n = 0\n"
+            "$n = SAY()\n");
+        const char *l = dscript_next(&d2);
+        CHECK(l && strcmp(l, "STRING hi") == 0, "the body still runs, got [%s]", l ? l : "(null)");
+        while (dscript_next(&d2)) {}
+        int32_t n2 = -1;
+        CHECK(dscript_get(&d2, "n", &n2) && n2 == 3, "and the value comes back, got %ld", (long)n2);
+
+        /* an 8 KB line survives: the official library has base64 blobs at 6.5 KB */
+        static char big[9000];
+        int o = snprintf(big, sizeof(big), "STRING ");
+        for (int i = 0; i < 6800; i++) big[o++] = 'a';
+        big[o++] = '\n'; big[o] = 0;
+        static dscript_t d3;
+        dscript_init(&d3, big);
+        l = dscript_next(&d3);
+        CHECK(l && strlen(l) > 6000, "a 6.8 KB line is not truncated, got %u chars",
+              (unsigned)(l ? strlen(l) : 0));
+    }
 TEST_MAIN_END

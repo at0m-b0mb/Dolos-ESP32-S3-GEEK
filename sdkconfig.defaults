@@ -31,3 +31,8 @@ CONFIG_FATFS_MAX_LFN=64
 # which is exactly what made the "fast" and "balanced" typing profiles emit
 # keystrokes back-to-back with no pacing at all, and drop characters.
 CONFIG_FREERTOS_HZ=1000
+
+# The DuckyScript parse buffers (8 KB lines, to fit the base64 one-liners real
+# payloads contain) live in PSRAM. Internal RAM is what Wi-Fi, TinyUSB and the
+# HTTP server compete for, and starving it is what crashed this device before.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y

@@ -67,7 +67,8 @@ typedef struct {
 
 typedef struct {
     uint32_t    default_delay_ms;/* inserted between commands (DEFAULTDELAY) */
-    char        last_cmd[2048];   /* remembered for REPEAT                    */
+    char        last_cmd[512];    /* REPEAT target: a command, not a document */
+    char        scratch[8192];   /* parse buffer, per caller - never on the stack */   /* remembered for REPEAT                    */
     int         repeat;          /* pending REPEAT count (player consumes)   */
     kb_layout_t layout;          /* target keyboard layout for STRING/chars  */
     target_os_t target_os;       /* OS for Unicode (STRING non-ASCII/UNICODE)*/
