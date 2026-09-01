@@ -6,9 +6,20 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
 
 #define LINT_LINE_MAX 8192     /* must match the player's line buffer */
+
+/* Case-insensitive prefix test. Hand-rolled for the same reason as in ducky.c:
+ * compare is POSIX, not ISO C, and the difference only shows up on the Linux
+ * CI runner - never on macOS, where it is declared regardless. */
+static int lkw_prefix(const char *s, const char *pfx, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (!s[i] || !pfx[i]) return 0;
+        if (toupper((unsigned char)s[i]) != toupper((unsigned char)pfx[i])) return 0;
+    }
+    return 1;
+}
 
 static int lkw(const char *tok, const char *word)
 {
@@ -156,7 +167,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
             const char *b = line;
             while (*b == ' ' || *b == '\t') b++;
             if (in_block) {
-                if (strncasecmp(b, "END_STRINGLN", 12) == 0 || strncasecmp(b, "END_STRING", 10) == 0)
+                if (lkw_prefix(b, "END_STRINGLN", 12) || lkw_prefix(b, "END_STRING", 10))
                     in_block = 0;
                 continue;
             }
@@ -165,15 +176,15 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
             bool opened = false;
             for (int q = 0; OPEN[q]; q++) {
                 size_t ln2 = strlen(OPEN[q]);
-                if (strncasecmp(b, OPEN[q], ln2) == 0) {
+                if (lkw_prefix(b, OPEN[q], ln2)) {
                     const char *after = b + ln2;
                     while (*after == ' ' || *after == '\t' || *after == '\r') after++;
                     if (*after == 0) { opened = true; break; }
                 }
             }
             /* the bare keyword alone on its line also opens a block */
-            if (!opened && (strncasecmp(b, "STRINGLN", 8) == 0 || strncasecmp(b, "STRING", 6) == 0)) {
-                const char *after = b + (strncasecmp(b, "STRINGLN", 8) == 0 ? 8 : 6);
+            if (!opened && (lkw_prefix(b, "STRINGLN", 8) || lkw_prefix(b, "STRING", 6))) {
+                const char *after = b + (lkw_prefix(b, "STRINGLN", 8) ? 8 : 6);
                 while (*after == ' ' || *after == '\t' || *after == '\r') after++;
                 if (*after == 0) opened = true;      /* "STRING" with no text */
             }
@@ -200,7 +211,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
             bool consumed = false;
             for (int q = 0; DS_CONSUMED[q]; q++) {
                 size_t ln = strlen(DS_CONSUMED[q]);
-                if (strncasecmp(t2, DS_CONSUMED[q], ln) == 0 &&
+                if (lkw_prefix(t2, DS_CONSUMED[q], ln) &&
                     (t2[ln] == 0 || t2[ln] == ' ' || t2[ln] == '\t' || t2[ln] == '\r')) {
                     consumed = true; break;
                 }

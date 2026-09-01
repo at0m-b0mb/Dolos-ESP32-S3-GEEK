@@ -7,8 +7,27 @@ DSRC   := $(DUCKY)/dscript.c $(DUCKY)/ducky.c $(DUCKY)/hid_keymap.c $(DUCKY)/lay
 BIN    := ./bin
 SUITES := test_sbuf test_dscript test_keymap test_ducky test_dui test_layout test_config test_auth test_unicode test_lint test_fuzz test_menu test_button
 
-.PHONY: all clean
-all: $(SUITES:%=run-%)
+.PHONY: all clean portability
+
+# POSIX functions that macOS declares unconditionally and glibc hides under
+# -std=c11. Twice now one of these has compiled cleanly here and failed on the
+# Linux runner, so the portable sources are checked before anything is built.
+POSIX_ONLY := strncasecmp strcasecmp strnlen strdup strsep index rindex
+PORTABLE := $(DUCKY)/dscript.c $(DUCKY)/ducky.c $(DUCKY)/lint.c \
+            $(DUCKY)/hid_keymap.c $(DUCKY)/layout.c $(DUCKY)/unicode.c \
+            $(DUCKY)/dconfig.c $(DUCKY)/menu.c ../../components/dconsole/src/auth.c
+portability:
+	@bad=0; for f in $(PORTABLE); do \
+	  code=$$(sed -e 's://.*::' -e '/^[[:space:]]*\*/d' -e 's:/\*.*\*/::' $$f); \
+	  for fn in $(POSIX_ONLY); do \
+	    if printf '%s' "$$code" | grep -qE "[^A-Za-z_]$$fn[[:space:]]*\("; then \
+	      echo "  $$f uses $$fn() - POSIX, not ISO C; glibc rejects it under -std=c11"; \
+	      bad=1; fi; \
+	  done; done; \
+	if [ $$bad -ne 0 ]; then echo "portability check FAILED"; exit 1; fi; \
+	echo "portability: portable sources use ISO C only"
+
+all: portability $(SUITES:%=run-%)
 	@echo "\nAll suites passed."
 run-%: $(BIN)/%
 	@echo "--- $< ---"; $<

@@ -9,6 +9,29 @@
 
 static int kw(const char *tok, const char *word);  /* case-insensitive equals */
 
+/* Case-insensitive prefix test. Hand-rolled because the POSIX case-insensitive
+ * compare is not ISO C: macOS exposes it regardless, glibc hides it under
+ * -std=c11, and the difference only shows up in CI. */
+static int kw_prefix(const char *s, const char *pfx, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (!s[i] || !pfx[i]) return 0;
+        if (toupper((unsigned char)s[i]) != toupper((unsigned char)pfx[i])) return 0;
+    }
+    return 1;
+}
+
+/* Copy at most cap-1 bytes and always terminate. snprintf("%s") with a source
+ * that can be far longer than the destination makes GCC warn about truncation
+ * it cannot prove is intentional - and here it very much is. */
+static void copy_bounded(char *dst, size_t cap, const char *src)
+{
+    size_t i = 0;
+    if (!cap) return;
+    while (src && src[i] && i < cap - 1) { dst[i] = src[i]; i++; }
+    dst[i] = 0;
+}
+
 /* Consumer-control (media) usage codes, HID consumer page 0x0C. */
 static uint16_t media_usage(const char *n)
 {
@@ -226,7 +249,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
          * interface it does not have, and silently continuing would leave a
          * payload waiting for a drive that never appears - so it is refused. */
         out[0].kind = DUCKY_SPECIAL; out[0].key = 0; out[0].mods = 0;
-        snprintf(out[0].text, sizeof(out[0].text), "%s", rest);
+        copy_bounded(out[0].text, sizeof(out[0].text), rest);
         if (kw(rest, "OFF"))                       out[0].special = DSP_ATTACKMODE_OFF;
         else if (strstr(rest, "STORAGE") || strstr(rest, "storage")) {
             /* This device has no mass-storage interface. Refusing the line
@@ -241,7 +264,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
     if (kw(cmd, "EXFIL")) {
         out[0].kind = DUCKY_SPECIAL; out[0].special = DSP_EXFIL;
         out[0].key = 0; out[0].mods = 0;
-        snprintf(out[0].text, sizeof(out[0].text), "%s", rest);
+        copy_bounded(out[0].text, sizeof(out[0].text), rest);
         return 1;
     }
     if (kw(cmd, "INJECT_MOD")) {
@@ -323,7 +346,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         while (*after && *after != ' ') after++;
         while (*after == ' ') after++;
         if (r > 0 && *after) {
-            snprintf(st->last_cmd, sizeof(st->last_cmd), "%s", after);
+            copy_bounded(st->last_cmd, sizeof(st->last_cmd), after);
             st->repeat = r;
             return 0;
         }
@@ -382,7 +405,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         return 1;
     }
     if (kw(cmd, "MOUSECLICK") || kw(cmd, "MOUSEBUTTON") ||
-        (kw(cmd, "MOUSE") && (!strncasecmp(rest, "CLICK", 5)))) {
+        (kw(cmd, "MOUSE") && kw_prefix(rest, "CLICK", 5))) {
         if (kw(cmd, "MOUSE")) { rest += 5; while (*rest == ' ') rest++; }
         /* Named (LEFT/RIGHT/MIDDLE) or numbered (1/2/4) - both appear. */
         uint8_t mb = mouse_button(rest);
