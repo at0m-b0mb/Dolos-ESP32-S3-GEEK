@@ -182,4 +182,58 @@ TEST_MAIN_BEGIN
         while (dscript_next(&ds) != NULL) n++;
         CHECK(n == 4, "8 file lines but 4 executed (3 loop + 1), got %d", n);
     }
+
+    SUITE("dscript: DEFINE is a TEXT macro, not an arithmetic assignment");
+    {
+        /* This is the single biggest compatibility fact about DuckyScript, and
+         * getting it wrong failed 136 of the 253 official payloads: almost no
+         * DEFINE in the library holds a number. */
+        static dscript_t d;
+        const char *p1 =
+            "DEFINE #SCRIPT_URL https://example.com/a.ps1\n"
+            "DEFINE SUDO_PASS hunter2\n"
+            "STRING curl #SCRIPT_URL\n"
+            "STRING pw is SUDO_PASS\n";
+        dscript_init(&d, p1);
+        const char *l = dscript_next(&d);
+        CHECK(l && strcmp(l, "STRING curl https://example.com/a.ps1") == 0,
+              "#NAME is replaced by its text, got [%s]", l ? l : "(null)");
+        l = dscript_next(&d);
+        CHECK(l && strcmp(l, "STRING pw is hunter2") == 0,
+              "a DEFINE without a sigil works too, got [%s]", l ? l : "(null)");
+        CHECK(dscript_error(&d) == NULL, "no error: %s", dscript_error(&d) ? dscript_error(&d) : "");
+
+        /* a numeric DEFINE still works in arithmetic, because the substituted
+         * text simply parses as a number */
+        static dscript_t d2;
+        dscript_init(&d2, "DEFINE #N 3\nVAR $x = (#N * 2)\n");
+        while (dscript_next(&d2)) {}
+        int32_t v = 0;
+        CHECK(dscript_get(&d2, "x", &v) && v == 6, "numeric DEFINE still computes, got %ld", (long)v);
+
+        /* substitution respects token boundaries: #FOO must not match #FOOBAR */
+        static dscript_t d3;
+        dscript_init(&d3, "DEFINE #A one\nDEFINE #AB two\nSTRING #AB\n");
+        l = dscript_next(&d3);
+        CHECK(l && strcmp(l, "STRING two") == 0, "#AB is not mangled by #A, got [%s]", l ? l : "");
+    }
+
+    SUITE("dscript: long system-variable names are not truncated");
+    {
+        /* $_HOST_CONFIGURATION_REQUEST_COUNT is 33 characters. A 16-byte name
+         * buffer split it in two and reported the tail as an unknown variable. */
+        static dscript_t d;
+        dscript_init(&d, "VAR $n = 0\nIF ($_HOST_CONFIGURATION_REQUEST_COUNT > 1) THEN\n $n = 5\nEND_IF\n");
+        dscript_set_host_usb(&d, 3, 1);
+        while (dscript_next(&d)) {}
+        int32_t v = 0;
+        CHECK(dscript_error(&d) == NULL, "no error: %s", dscript_error(&d) ? dscript_error(&d) : "");
+        CHECK(dscript_get(&d, "n", &v) && v == 5, "the 33-character system variable resolved, n=%ld", (long)v);
+
+        /* any other $_ name exists and reads as zero rather than erroring */
+        static dscript_t d2;
+        dscript_init(&d2, "VAR $k = ($_EXFIL_MODE_ENABLED + 1)\n");
+        while (dscript_next(&d2)) {}
+        CHECK(dscript_error(&d2) == NULL, "unset $_ variables are zero, not errors");
+    }
 TEST_MAIN_END

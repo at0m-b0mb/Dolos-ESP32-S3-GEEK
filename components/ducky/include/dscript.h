@@ -36,10 +36,17 @@ extern "C" {
 #endif
 
 #define DS_MAX_LINES  1400   /* lines in a payload                        */
-#define DS_MAX_VARS     32   /* VAR + DEFINE entries                      */
+#define DS_MAX_VARS     32   /* VAR entries (numeric)                     */
+#define DS_MAX_DEFS     40   /* DEFINE entries (text macros)              */
+#define DS_DEF_NAME     40   /* $_HOST_CONFIGURATION_REQUEST_COUNT is 33  */
+#define DS_DEF_VAL     128   /* a URL or a webhook, comfortably           */
 #define DS_MAX_FUNCS    16   /* FUNCTION definitions                      */
 #define DS_MAX_DEPTH    16   /* nesting of calls and loops                */
-#define DS_MAX_STEPS 200000  /* runaway guard: a loop cannot run for ever */
+/* Runaway guard. Sized from the official library: the longest legitimate
+ * payload there executes about 171,000 lines, so this leaves headroom while
+ * still stopping a loop with no exit. A payload that means to run for ever
+ * (a menu, a prank) is aborted at the device instead. */
+#define DS_MAX_STEPS 1000000
 #define DS_LINE_MAX   2048   /* matches the player's line buffer          */
 
 typedef struct {
@@ -49,7 +56,15 @@ typedef struct {
     uint16_t nlines;
     uint16_t pc;                       /* next line to consider           */
 
-    struct { char name[16]; int32_t val; } var[DS_MAX_VARS];
+    struct { char name[DS_DEF_NAME]; int32_t val; } var[DS_MAX_VARS];
+
+    /* DEFINE is a TEXT MACRO, not a number: the official payloads write
+     *     DEFINE #SCRIPT_URL https://example.com/script.ps1
+     * and expect the name replaced by that text wherever it appears. Treating
+     * it as an arithmetic assignment failed 136 of the 253 official payloads,
+     * because almost no DEFINE in the library holds a number. */
+    struct { char name[DS_DEF_NAME]; char val[DS_DEF_VAL]; } def[DS_MAX_DEFS];
+    uint8_t ndefs;
     uint8_t nvars;
 
     struct { char name[20]; uint16_t line; } fn[DS_MAX_FUNCS];
@@ -65,6 +80,12 @@ typedef struct {
     uint8_t  host_leds;    /* live lock-key LEDs: bit0 Num, bit1 Caps, bit2 Scroll */
     uint8_t  saved_leds;   /* SAVE_HOST_KEYBOARD_LOCK_STATE                  */
     uint8_t  button_pushed;
+    /* Facts a payload uses to work out what it is plugged into. Windows, Linux
+     * and macOS ask for USB descriptors a different number of times, and only
+     * some hosts send a lock-LED report back - which is why the official
+     * OS-detection payloads read exactly these two. */
+    int32_t  host_cfg_requests;
+    uint8_t  host_lock_reply;
     uint32_t (*rnd)(void); /* random source for $_RANDOM_INT (NULL = counter) */
     uint32_t rnd_ctr;
     uint32_t steps;
@@ -72,6 +93,9 @@ typedef struct {
      * output is legitimately longer than the input line it came from. */
     char     out[DS_LINE_MAX + 16];         /* expanded line handed to the caller */
     const char *err;                   /* non-NULL once the script is broken */
+    /* Big enough for the longest message plus a full-length name, so an
+     * error can always say WHICH thing it is about. */
+    char     errbuf[DS_DEF_NAME + 56];
     uint16_t err_line;                 /* 1-based line the error came from   */
 } dscript_t;
 
@@ -92,6 +116,9 @@ bool dscript_get(const dscript_t *ds, const char *name, int32_t *out);
 /* Tell the script about the machine it is running on, so $_OS, $_CAPSLOCK_ON,
  * $_RANDOM_INT and friends mean something. Safe to call between lines. */
 void dscript_set_host(dscript_t *ds, int32_t os, uint8_t leds, uint8_t button_pushed);
+
+/* USB-level facts the OS-detection payloads read. */
+void dscript_set_host_usb(dscript_t *ds, int32_t cfg_requests, uint8_t lock_reply);
 
 /* True if the line is a control-flow KEYWORD (no context needed). */
 bool dscript_is_control(const char *line);

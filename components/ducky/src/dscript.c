@@ -88,6 +88,12 @@ static bool var_set(dscript_t *ds, const char *name, int32_t v)
     return true;
 }
 
+void dscript_set_host_usb(dscript_t *ds, int32_t cfg_requests, uint8_t lock_reply)
+{
+    ds->host_cfg_requests = cfg_requests;
+    ds->host_lock_reply = lock_reply;
+}
+
 void dscript_set_host(dscript_t *ds, int32_t os, uint8_t leds, uint8_t button_pushed)
 {
     ds->host_os = os;
@@ -119,6 +125,30 @@ static bool sys_var(dscript_t *ds, const char *name, int32_t *out)
     if (ieq(name, "_SAVED_NUMLOCK_ON"))    { *out = (ds->saved_leds & 0x01) ? 1 : 0; return true; }
     if (ieq(name, "_SAVED_SCROLLLOCK_ON")) { *out = (ds->saved_leds & 0x04) ? 1 : 0; return true; }
     if (ieq(name, "_BUTTON_PUSH_RECEIVED")) { *out = ds->button_pushed ? 1 : 0; return true; }
+    if (ieq(name, "_HOST_CONFIGURATION_REQUEST_COUNT")) { *out = ds->host_cfg_requests; return true; }
+    if (ieq(name, "_RECEIVED_HOST_LOCK_LED_REPLY"))     { *out = ds->host_lock_reply ? 1 : 0; return true; }
+    /* Random keycodes, as HID usage ids, for payloads that build their own
+     * strings a character at a time. */
+    if (ieq(name, "_RANDOM_LOWER_LETTER_KEYCODE") || ieq(name, "_RANDOM_UPPER_LETTER_KEYCODE") ||
+        ieq(name, "_RANDOM_LETTER_KEYCODE")) {
+        uint32_t r = ds->rnd ? ds->rnd() : (ds->rnd_ctr = ds->rnd_ctr * 1664525u + 1013904223u);
+        *out = 0x04 + (int32_t)(r % 26);            /* HID a..z */
+        return true;
+    }
+    if (ieq(name, "_RANDOM_NUMBER_KEYCODE")) {
+        uint32_t r = ds->rnd ? ds->rnd() : (ds->rnd_ctr = ds->rnd_ctr * 1664525u + 1013904223u);
+        *out = 0x1E + (int32_t)(r % 10);            /* HID 1..0 */
+        return true;
+    }
+    /* A value the payload set explicitly wins over the default for the
+     * writable ones; the read-only host facts above never reach here. */
+    if (ieq(name, "_RANDOM_MIN") || ieq(name, "_RANDOM_MAX") ||
+        ieq(name, "_EXFIL_MODE_ENABLED") || ieq(name, "_EXFIL_LEDS_ENABLED") ||
+        ieq(name, "_JITTER_ENABLED") || ieq(name, "_JITTER_MAX")) {
+        int i = var_index(ds, name);
+        *out = (i >= 0) ? ds->var[i].val : (ieq(name, "_RANDOM_MAX") ? 65535 : 0);
+        return true;
+    }
     if (ieq(name, "_RANDOM_INT")) {
         int32_t lo = 0, hi = 65535;
         int i = var_index(ds, "_RANDOM_MIN"); if (i >= 0) lo = ds->var[i].val;
@@ -128,7 +158,16 @@ static bool sys_var(dscript_t *ds, const char *name, int32_t *out)
         *out = lo + (int32_t)(r % (uint32_t)(hi - lo + 1));
         return true;
     }
-    return false;   /* other $_ names behave as ordinary variables */
+    /* Every other $_ name still EXISTS - on the real device they are all
+     * defined, and several ($_RANDOM_MAX, $_EXFIL_MODE_ENABLED, $_JITTER_MAX)
+     * are written by payloads before they are read. So: a stored value wins,
+     * and an unread one is zero rather than an error. Treating them as unknown
+     * variables was rejecting 137 of the 253 official payloads outright. */
+    {
+        int i = var_index(ds, name);
+        *out = (i >= 0) ? ds->var[i].val : 0;
+        return true;
+    }
 }
 
 /* ------------------------------------------------------------ expressions
@@ -182,7 +221,7 @@ static int32_t ex_atom(ex_t *e)
         return (int32_t)v;
     }
     if (*e->p == '$' || *e->p == '#' || isalpha((unsigned char)*e->p) || *e->p == '_') {
-        char name[16]; size_t n = 0;
+        char name[DS_DEF_NAME]; size_t n = 0;
         if (*e->p == '$' || *e->p == '#') e->p++;
         while ((isalnum((unsigned char)*e->p) || *e->p == '_') && n < sizeof(name) - 1)
             name[n++] = *e->p++;
@@ -196,7 +235,22 @@ static int32_t ex_atom(ex_t *e)
         int32_t sysv;
         if (sys_var(e->ds, name, &sysv)) return sysv;
         int i = var_index(e->ds, name);
-        if (i < 0) { fail(e->ds, "unknown variable"); return 0; }
+        if (i < 0) {
+            /* Name the thing. "unknown variable" on a 300-line payload is an
+             * invitation to guess; naming it turns it into a fix. A function
+             * call used as a value gets its own message, because that is a
+             * limitation of this interpreter rather than a mistake in the
+             * payload - functions run as statements here, not as expressions. */
+            const char *q2 = e->p;
+            while (*q2 == ' ') q2++;
+            if (*q2 == '(')
+                snprintf(e->ds->errbuf, sizeof(e->ds->errbuf),
+                         "%s() cannot be used as a value here", name);
+            else
+                snprintf(e->ds->errbuf, sizeof(e->ds->errbuf), "unknown variable $%s", name);
+            fail(e->ds, e->ds->errbuf);
+            return 0;
+        }
         return e->ds->var[i].val;
     }
     fail(e->ds, "bad expression");
@@ -438,12 +492,39 @@ uint16_t    dscript_error_line(const dscript_t *ds) { return ds->err_line; }
 
 /* --------------------------------------------------------- $var expansion */
 
+/* Replace every DEFINE name with its text, on whole-token boundaries so that
+ * #FOO does not match inside #FOOBAR. Applied to each line before it is parsed,
+ * which is exactly what the Ducky toolchain does at compile time. */
+static void expand_defines(dscript_t *ds, const char *in, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (const char *p = in; *p && o < cap - 1; ) {
+        bool hit = false;
+        for (int i = 0; i < ds->ndefs && !hit; i++) {
+            size_t nl = strlen(ds->def[i].name);
+            if (!nl || strncmp(p, ds->def[i].name, nl) != 0) continue;
+            char after = p[nl];
+            if (isalnum((unsigned char)after) || after == '_' || after == '-') continue;
+            /* and it must start on a token boundary, not mid-word */
+            if (p != in) {
+                char before = p[-1];
+                if (isalnum((unsigned char)before) || before == '_') continue;
+            }
+            o += (size_t)snprintf(out + o, cap - o, "%s", ds->def[i].val);
+            p += nl;
+            hit = true;
+        }
+        if (!hit) out[o++] = *p++;
+    }
+    out[o < cap ? o : cap - 1] = 0;
+}
+
 static void expand_vars(dscript_t *ds, const char *in, char *out, size_t cap)
 {
     size_t o = 0;
     for (const char *p = in; *p && o < cap - 1; ) {
         if ((*p == '$' || *p == '#') && (isalpha((unsigned char)p[1]) || p[1] == '_')) {
-            char name[16]; size_t n = 0;
+            char name[DS_DEF_NAME]; size_t n = 0;
             const char *q = p + 1;
             while ((isalnum((unsigned char)*q) || *q == '_') && n < sizeof(name) - 1) name[n++] = *q++;
             name[n] = 0;
@@ -470,6 +551,15 @@ const char *dscript_next(dscript_t *ds)
 
         uint16_t here = ds->pc;
         get_line(ds, here, buf, sizeof(buf));
+        /* Macro expansion first, so everything below - conditions, delays,
+         * text to type - sees the substituted text, exactly as the Ducky
+         * toolchain would have produced it at compile time. */
+        if (ds->ndefs) {
+            char ex[DS_LINE_MAX];
+            expand_defines(ds, buf, ex, sizeof(ex));
+            memcpy(buf, ex, sizeof(buf) < sizeof(ex) ? sizeof(buf) : sizeof(ex));
+            buf[sizeof(buf) - 1] = 0;
+        }
         const char *l = skip_ws(buf);
         ds->pc++;
 
@@ -579,10 +669,31 @@ const char *dscript_next(dscript_t *ds)
         if (starts_with_kw(l, "REM")) continue;
 
         /* ---- variables ---- */
-        if (starts_with_kw(l, "VAR") || starts_with_kw(l, "DEFINE")) {
-            const char *r = skip_ws(l + (starts_with_kw(l, "VAR") ? 3 : 6));
+        /* ---- DEFINE: a text macro ---- */
+        if (starts_with_kw(l, "DEFINE")) {
+            const char *r = skip_ws(l + 6);
+            if (ds->ndefs < DS_MAX_DEFS) {
+                size_t k = 0;
+                /* the name is taken exactly as written, sigil included, since
+                 * that is the token the payload later references */
+                while (*r && *r != ' ' && *r != '\t' && k < DS_DEF_NAME - 1)
+                    ds->def[ds->ndefs].name[k++] = *r++;
+                ds->def[ds->ndefs].name[k] = 0;
+                r = skip_ws(r);
+                size_t v = 0;
+                while (*r && *r != '\r' && v < DS_DEF_VAL - 1) ds->def[ds->ndefs].val[v++] = *r++;
+                while (v > 0 && (ds->def[ds->ndefs].val[v-1] == ' ' ||
+                                 ds->def[ds->ndefs].val[v-1] == '\t')) v--;
+                ds->def[ds->ndefs].val[v] = 0;
+                if (k) ds->ndefs++;
+            }
+            continue;
+        }
+
+        if (starts_with_kw(l, "VAR")) {
+            const char *r = skip_ws(l + 3);
             if (*r == '$' || *r == '#') r++;
-            char name[16]; size_t n = 0;
+            char name[DS_DEF_NAME]; size_t n = 0;
             while ((isalnum((unsigned char)*r) || *r == '_') && n < sizeof(name) - 1) name[n++] = *r++;
             name[n] = 0;
             r = skip_ws(r);
@@ -595,7 +706,7 @@ const char *dscript_next(dscript_t *ds)
         /* ---- assignment to an existing variable:  $x = $x + 1 ---- */
         if (*l == '$') {
             const char *r = l + 1;
-            char name[16]; size_t n = 0;
+            char name[DS_DEF_NAME]; size_t n = 0;
             while ((isalnum((unsigned char)*r) || *r == '_') && n < sizeof(name) - 1) name[n++] = *r++;
             name[n] = 0;
             const char *after = skip_ws(r);
