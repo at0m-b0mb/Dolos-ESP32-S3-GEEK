@@ -259,7 +259,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
         ilog_note("  line %d: \"%s\" -> %d action(s)\n", cur, line, n);
 
         if (st.repeat > 0) {
-            char saved[160];
+            char saved[2048];
             strncpy(saved, st.last_cmd, sizeof(saved) - 1); saved[sizeof(saved) - 1] = 0;
             int reps = st.repeat;
             for (int r = 0; r < reps && !(ctx->abort && *ctx->abort); r++) {

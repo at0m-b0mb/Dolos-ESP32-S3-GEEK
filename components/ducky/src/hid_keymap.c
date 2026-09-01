@@ -79,11 +79,30 @@ bool hid_named_key(const char *tok, uint8_t *key)
     else if (ieq(tok, "END"))                         k = HID_KEY_END;
     else if (ieq(tok, "PAGEUP") || ieq(tok, "PGUP"))  k = HID_KEY_PGUP;
     else if (ieq(tok, "PAGEDOWN") || ieq(tok, "PGDN")) k = HID_KEY_PGDN;
-    else if (ieq(tok, "UP") || ieq(tok, "UPARROW"))   k = HID_KEY_UP;
-    else if (ieq(tok, "DOWN") || ieq(tok, "DOWNARROW")) k = HID_KEY_DOWN;
-    else if (ieq(tok, "LEFT") || ieq(tok, "LEFTARROW")) k = HID_KEY_LEFT;
-    else if (ieq(tok, "RIGHT") || ieq(tok, "RIGHTARROW")) k = HID_KEY_RIGHT;
+    else if (ieq(tok, "UP") || ieq(tok, "UPARROW") || ieq(tok, "UP_ARROW"))   k = HID_KEY_UP;
+    else if (ieq(tok, "DOWN") || ieq(tok, "DOWNARROW") || ieq(tok, "DOWN_ARROW")) k = HID_KEY_DOWN;
+    else if (ieq(tok, "LEFT") || ieq(tok, "LEFTARROW") || ieq(tok, "LEFT_ARROW")) k = HID_KEY_LEFT;
+    else if (ieq(tok, "RIGHT") || ieq(tok, "RIGHTARROW") || ieq(tok, "RIGHT_ARROW")) k = HID_KEY_RIGHT;
     else if (ieq(tok, "CAPSLOCK") || ieq(tok, "CAPS")) k = HID_KEY_CAPS;
+    /* Keypad. ALT-code payloads spell characters as ALT + digits on the
+     * KEYPAD specifically - the number row does not produce the same result,
+     * so these cannot be aliases for the top-row digits. */
+    else if (ieq(tok, "KPAD_0") || ieq(tok, "NUMPAD_0")) k = HID_KEY_KP0;
+    else if (ieq(tok, "KPAD_1") || ieq(tok, "NUMPAD_1")) k = HID_KEY_KP1;
+    else if (ieq(tok, "KPAD_2") || ieq(tok, "NUMPAD_2")) k = HID_KEY_KP1 + 1;
+    else if (ieq(tok, "KPAD_3") || ieq(tok, "NUMPAD_3")) k = HID_KEY_KP1 + 2;
+    else if (ieq(tok, "KPAD_4") || ieq(tok, "NUMPAD_4")) k = HID_KEY_KP1 + 3;
+    else if (ieq(tok, "KPAD_5") || ieq(tok, "NUMPAD_5")) k = HID_KEY_KP1 + 4;
+    else if (ieq(tok, "KPAD_6") || ieq(tok, "NUMPAD_6")) k = HID_KEY_KP1 + 5;
+    else if (ieq(tok, "KPAD_7") || ieq(tok, "NUMPAD_7")) k = HID_KEY_KP1 + 6;
+    else if (ieq(tok, "KPAD_8") || ieq(tok, "NUMPAD_8")) k = HID_KEY_KP1 + 7;
+    else if (ieq(tok, "KPAD_9") || ieq(tok, "NUMPAD_9")) k = HID_KEY_KP1 + 8;
+    else if (ieq(tok, "KPAD_ENTER")) k = 0x58;
+    else if (ieq(tok, "KPAD_PLUS"))  k = HID_KEY_KP_PLUS;
+    else if (ieq(tok, "KPAD_MINUS")) k = 0x56;
+    else if (ieq(tok, "KPAD_STAR") || ieq(tok, "KPAD_ASTERISK")) k = 0x55;
+    else if (ieq(tok, "KPAD_SLASH")) k = 0x54;
+    else if (ieq(tok, "KPAD_DOT") || ieq(tok, "KPAD_PERIOD")) k = 0x63;
     else if (ieq(tok, "NUMLOCK"))                     k = HID_KEY_NUMLOCK;
     else if (ieq(tok, "SCROLLLOCK") || ieq(tok, "SCROLL")) k = HID_KEY_SCROLLLOCK;
     else if (ieq(tok, "PAUSE") || ieq(tok, "BREAK"))  k = HID_KEY_PAUSE;

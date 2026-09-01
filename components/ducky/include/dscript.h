@@ -35,12 +35,12 @@
 extern "C" {
 #endif
 
-#define DS_MAX_LINES   512   /* lines in a payload                        */
+#define DS_MAX_LINES  1400   /* lines in a payload                        */
 #define DS_MAX_VARS     32   /* VAR + DEFINE entries                      */
 #define DS_MAX_FUNCS    16   /* FUNCTION definitions                      */
 #define DS_MAX_DEPTH    16   /* nesting of calls and loops                */
 #define DS_MAX_STEPS 200000  /* runaway guard: a loop cannot run for ever */
-#define DS_LINE_MAX    224   /* matches the player's line buffer          */
+#define DS_LINE_MAX   2048   /* matches the player's line buffer          */
 
 typedef struct {
     const char *text;
@@ -58,8 +58,19 @@ typedef struct {
     uint16_t ret[DS_MAX_DEPTH];  uint8_t nret;    /* return addresses      */
     uint16_t loop[DS_MAX_DEPTH]; uint8_t nloop;   /* WHILE line numbers    */
 
+    uint8_t  block;        /* inside STRING/END_STRING (1) or STRINGLN (2)   */
+    /* Host facts the script can read as $_ system variables. The caller keeps
+     * these current; the interpreter never touches hardware itself. */
+    int32_t  host_os;      /* 0 Windows, 1 Linux, 2 macOS                    */
+    uint8_t  host_leds;    /* live lock-key LEDs: bit0 Num, bit1 Caps, bit2 Scroll */
+    uint8_t  saved_leds;   /* SAVE_HOST_KEYBOARD_LOCK_STATE                  */
+    uint8_t  button_pushed;
+    uint32_t (*rnd)(void); /* random source for $_RANDOM_INT (NULL = counter) */
+    uint32_t rnd_ctr;
     uint32_t steps;
-    char     out[DS_LINE_MAX];         /* expanded line handed to the caller */
+    /* +16: a block line is handed back with a "STRINGLN " prefix, so the
+     * output is legitimately longer than the input line it came from. */
+    char     out[DS_LINE_MAX + 16];         /* expanded line handed to the caller */
     const char *err;                   /* non-NULL once the script is broken */
     uint16_t err_line;                 /* 1-based line the error came from   */
 } dscript_t;
@@ -77,6 +88,10 @@ uint16_t    dscript_error_line(const dscript_t *ds);
 
 /* Read a variable back, mainly so tests can assert on what a script computed. */
 bool dscript_get(const dscript_t *ds, const char *name, int32_t *out);
+
+/* Tell the script about the machine it is running on, so $_OS, $_CAPSLOCK_ON,
+ * $_RANDOM_INT and friends mean something. Safe to call between lines. */
+void dscript_set_host(dscript_t *ds, int32_t os, uint8_t leds, uint8_t button_pushed);
 
 /* True if the line is a control-flow KEYWORD (no context needed). */
 bool dscript_is_control(const char *line);

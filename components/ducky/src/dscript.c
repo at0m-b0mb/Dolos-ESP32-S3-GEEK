@@ -14,12 +14,33 @@ static int ieq(const char *a, const char *b)
 }
 
 /* Does `line` begin with keyword `kw`, followed by end-of-line or a space? */
-static bool starts_with_kw(const char *line, const char *kw)
+/* The keyword alone on a line (trailing spaces allowed) - which is how a
+ * STRING block is opened, as opposed to "STRING some text". */
+static bool is_bare_kw(const char *l, const char *kw)
 {
     size_t n = strlen(kw);
     for (size_t i = 0; i < n; i++)
-        if (toupper((unsigned char)line[i]) != toupper((unsigned char)kw[i])) return false;
-    return line[n] == 0 || line[n] == ' ' || line[n] == '\t';
+        if (toupper((unsigned char)l[i]) != kw[i]) return false;
+    const char *r = l + n;
+    while (*r == ' ' || *r == '\t' || *r == '\r') r++;
+    return *r == 0;
+}
+
+static bool starts_with_kw(const char *line, const char *kw)
+{
+    size_t n = strlen(kw);
+    /* Case SENSITIVE, deliberately. DuckyScript keywords are upper case, and
+     * payloads routinely type lower-case shell and PowerShell that contains
+     * "if", "while" and "return". Matching those as control flow produced
+     * "IF without END_IF" against perfectly correct files. */
+    for (size_t i = 0; i < n; i++)
+        if (line[i] != kw[i]) return false;
+    /* A parenthesis counts as a delimiter: the official payloads write both
+     * "WHILE (cond)" and "WHILE(cond)", and treating the second as an unknown
+     * word left its END_WHILE dangling - which is what "END_WHILE without
+     * WHILE" really was, forty times over. */
+    return line[n] == 0 || line[n] == ' ' || line[n] == '\t' ||
+           line[n] == '(' || line[n] == '\r';
 }
 
 static const char *skip_ws(const char *p)
@@ -67,6 +88,13 @@ static bool var_set(dscript_t *ds, const char *name, int32_t v)
     return true;
 }
 
+void dscript_set_host(dscript_t *ds, int32_t os, uint8_t leds, uint8_t button_pushed)
+{
+    ds->host_os = os;
+    ds->host_leds = leds;
+    ds->button_pushed = button_pushed;
+}
+
 bool dscript_get(const dscript_t *ds, const char *name, int32_t *out)
 {
     if (*name == '$' || *name == '#') name++;
@@ -74,6 +102,33 @@ bool dscript_get(const dscript_t *ds, const char *name, int32_t *out)
     if (i < 0) return false;
     if (out) *out = ds->var[i].val;
     return true;
+}
+
+/* The $_ system variables: facts about the machine, not values the script set.
+ * They are resolved here rather than stored, so they are always current - a
+ * payload that waits for CAPS LOCK and then reads $_CAPSLOCK_ON must see what
+ * the host is doing now, not what it was when the line was parsed. */
+static bool sys_var(dscript_t *ds, const char *name, int32_t *out)
+{
+    if (name[0] != '_') return false;
+    if (ieq(name, "_OS"))            { *out = ds->host_os; return true; }
+    if (ieq(name, "_CAPSLOCK_ON"))   { *out = (ds->host_leds & 0x02) ? 1 : 0; return true; }
+    if (ieq(name, "_NUMLOCK_ON"))    { *out = (ds->host_leds & 0x01) ? 1 : 0; return true; }
+    if (ieq(name, "_SCROLLLOCK_ON")) { *out = (ds->host_leds & 0x04) ? 1 : 0; return true; }
+    if (ieq(name, "_SAVED_CAPSLOCK_ON"))   { *out = (ds->saved_leds & 0x02) ? 1 : 0; return true; }
+    if (ieq(name, "_SAVED_NUMLOCK_ON"))    { *out = (ds->saved_leds & 0x01) ? 1 : 0; return true; }
+    if (ieq(name, "_SAVED_SCROLLLOCK_ON")) { *out = (ds->saved_leds & 0x04) ? 1 : 0; return true; }
+    if (ieq(name, "_BUTTON_PUSH_RECEIVED")) { *out = ds->button_pushed ? 1 : 0; return true; }
+    if (ieq(name, "_RANDOM_INT")) {
+        int32_t lo = 0, hi = 65535;
+        int i = var_index(ds, "_RANDOM_MIN"); if (i >= 0) lo = ds->var[i].val;
+        i = var_index(ds, "_RANDOM_MAX");     if (i >= 0) hi = ds->var[i].val;
+        if (hi < lo) { int32_t t = lo; lo = hi; hi = t; }
+        uint32_t r = ds->rnd ? ds->rnd() : (ds->rnd_ctr = ds->rnd_ctr * 1664525u + 1013904223u);
+        *out = lo + (int32_t)(r % (uint32_t)(hi - lo + 1));
+        return true;
+    }
+    return false;   /* other $_ names behave as ordinary variables */
 }
 
 /* ------------------------------------------------------------ expressions
@@ -134,6 +189,12 @@ static int32_t ex_atom(ex_t *e)
         name[n] = 0;
         if (ieq(name, "TRUE"))  return 1;
         if (ieq(name, "FALSE")) return 0;
+        /* OS constants, so a payload can write IF ($_OS == WINDOWS) */
+        if (ieq(name, "WINDOWS")) return 0;
+        if (ieq(name, "LINUX"))   return 1;
+        if (ieq(name, "MAC") || ieq(name, "MACOS")) return 2;
+        int32_t sysv;
+        if (sys_var(e->ds, name, &sysv)) return sysv;
         int i = var_index(e->ds, name);
         if (i < 0) { fail(e->ds, "unknown variable"); return 0; }
         return e->ds->var[i].val;
@@ -381,7 +442,7 @@ static void expand_vars(dscript_t *ds, const char *in, char *out, size_t cap)
 {
     size_t o = 0;
     for (const char *p = in; *p && o < cap - 1; ) {
-        if (*p == '$' && (isalpha((unsigned char)p[1]) || p[1] == '_')) {
+        if ((*p == '$' || *p == '#') && (isalpha((unsigned char)p[1]) || p[1] == '_')) {
             char name[16]; size_t n = 0;
             const char *q = p + 1;
             while ((isalnum((unsigned char)*q) || *q == '_') && n < sizeof(name) - 1) name[n++] = *q++;
@@ -412,7 +473,103 @@ const char *dscript_next(dscript_t *ds)
         const char *l = skip_ws(buf);
         ds->pc++;
 
+        /* ---- inside a STRING / STRINGLN block ----
+         * DuckyScript 3 lets a payload write several lines of text as a block
+         * instead of repeating STRING on every one. Everything between the
+         * opening keyword and its END_ is content, including blank lines and
+         * anything that would otherwise look like a command. */
+        if (ds->block) {
+            const char *t = skip_ws(buf);
+            if (starts_with_kw(t, "END_STRINGLN") || starts_with_kw(t, "END_STRING")) {
+                ds->block = 0;
+                continue;
+            }
+            snprintf(ds->out, sizeof(ds->out), "%s %s",
+                     ds->block == 2 ? "STRINGLN" : "STRING", buf);
+            return ds->out;
+        }
+
         if (*l == 0) continue;
+
+        /* ---- opening a block: the keyword alone on its line ---- */
+        /* Blocks are opened by the bare keyword OR by the _BLOCK form the
+         * official library actually uses, and both close with END_STRING(LN). */
+        if (is_bare_kw(l, "STRINGLN") || is_bare_kw(l, "STRINGLN_BLOCK") ||
+            is_bare_kw(l, "STRINGLN_BASH") || is_bare_kw(l, "STRINGLN_POWERSHELL")) { ds->block = 2; continue; }
+        if (is_bare_kw(l, "STRING") || is_bare_kw(l, "STRING_BLOCK") ||
+            is_bare_kw(l, "STRING_BASH") || is_bare_kw(l, "STRING_POWERSHELL")) { ds->block = 1; continue; }
+
+        /* ---- EXTENSION ... END_EXTENSION ----
+         * An extension is a named library block: variable initialisers and
+         * FUNCTION definitions meant to be reused. On the Ducky the toolchain
+         * splices them in at compile time; here they already sit in the file,
+         * so the markers are transparent and the contents run where they are.
+         * That gets the VARs initialised and the FUNCTIONs registered, which is
+         * all the rest of the payload actually depends on. */
+        if (starts_with_kw(l, "EXTENSION") || starts_with_kw(l, "END_EXTENSION")) continue;
+
+        /* STAGE / END_STAGE are progress labels for the operator, not code. */
+        if (starts_with_kw(l, "STAGE") || starts_with_kw(l, "END_STAGE")) continue;
+
+        /* ---- IF_DEFINED_TRUE #CONST ... END_IF_DEFINED ----
+         * Conditional inclusion on a DEFINE, used heavily by the official
+         * library to build one payload with optional features. */
+        if (starts_with_kw(l, "IF_DEFINED_TRUE") || starts_with_kw(l, "IF_DEFINED_FALSE")) {
+            bool want_true = starts_with_kw(l, "IF_DEFINED_TRUE");
+            const char *r = skip_ws(l + (want_true ? 15 : 16));
+            if (*r == '#' || *r == '$') r++;
+            char nm[16]; size_t k = 0;
+            while ((isalnum((unsigned char)*r) || *r == '_') && k < sizeof(nm) - 1) nm[k++] = *r++;
+            nm[k] = 0;
+            int vi = var_index(ds, nm);
+            bool defined_true = (vi >= 0) && (ds->var[vi].val != 0);
+            if (defined_true != want_true) {
+                /* skip to the matching END_IF_DEFINED, respecting nesting */
+                int depth = 1;
+                while (ds->pc < ds->nlines && depth > 0) {
+                    char sk[DS_LINE_MAX];
+                    get_line(ds, ds->pc++, sk, sizeof(sk));
+                    const char *t = skip_ws(sk);
+                    if (starts_with_kw(t, "IF_DEFINED_TRUE") || starts_with_kw(t, "IF_DEFINED_FALSE")) depth++;
+                    else if (starts_with_kw(t, "END_IF_DEFINED")) depth--;
+                }
+            }
+            continue;
+        }
+        if (starts_with_kw(l, "END_IF_DEFINED")) continue;
+
+        /* ---- BUTTON_DEF ... END_BUTTON ----
+         * Code the Ducky runs when its button is pressed mid-payload. This
+         * device's button is the abort control while a payload runs, and
+         * quietly rebinding it would take away the operator's stop. The block
+         * is skipped rather than executed inline - which is the safe reading,
+         * and stops the definition being typed as if it were the payload. */
+        if (starts_with_kw(l, "BUTTON_DEF")) {
+            while (ds->pc < ds->nlines) {
+                char sk[DS_LINE_MAX];
+                get_line(ds, ds->pc++, sk, sizeof(sk));
+                if (starts_with_kw(skip_ws(sk), "END_BUTTON")) break;
+            }
+            continue;
+        }
+        if (starts_with_kw(l, "END_BUTTON")) continue;
+
+        /* ---- INJECT_VAR $x : type the VALUE of a variable ---- */
+        if (starts_with_kw(l, "INJECT_VAR")) {
+            const char *r = skip_ws(l + 10);
+            int32_t v = eval(ds, r);
+            if (ds->err) return NULL;
+            snprintf(ds->out, sizeof(ds->out), "STRING %ld", (long)v);
+            return ds->out;
+        }
+
+        /* ---- payload control ---- */
+        if (starts_with_kw(l, "RESTART_PAYLOAD")) {
+            ds->pc = 0; ds->nret = 0; ds->nloop = 0; ds->block = 0;
+            continue;
+        }
+        if (starts_with_kw(l, "STOP_PAYLOAD") || starts_with_kw(l, "EXIT")) { ds->pc = ds->nlines; return NULL; }
+        if (starts_with_kw(l, "IF_NOT_DEFINED_TRUE") || starts_with_kw(l, "IF_NOT_DEFINED_FALSE")) continue;
 
         /* Comments are not executable lines. Handing them back made the
          * progress counter advance while nothing was being typed, and inflated

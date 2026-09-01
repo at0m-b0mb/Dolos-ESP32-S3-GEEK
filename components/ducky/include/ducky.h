@@ -29,8 +29,23 @@ typedef enum {
     DUCKY_CONSUMER,  /* media / consumer usage                     */
     DUCKY_HOLD,      /* press+HOLD a.mods across following keys     */
     DUCKY_RELEASE,   /* release all held modifiers                 */
-    DUCKY_WAIT       /* block until a host lock-key condition holds  */
+    DUCKY_WAIT,      /* block until a host lock-key condition holds  */
+    DUCKY_SPECIAL    /* device action; see ducky_special_t in a.special */
 } ducky_action_kind_t;
+
+/* Device-level commands. They do not type anything, so the player carries them
+ * out itself: the interpreter and the linter only have to agree they exist. */
+typedef enum {
+    DSP_NONE = 0,
+    DSP_LED_OFF, DSP_LED_R, DSP_LED_G,      /* the GEEK has a screen, not an RGB LED */
+    DSP_SAVE_LOCKS, DSP_RESTORE_LOCKS,      /* host CAPS/NUM/SCROLL state             */
+    DSP_WAIT_BUTTON,                        /* halt until BOOT is pressed             */
+    DSP_BUTTON_ENABLE, DSP_BUTTON_DISABLE,
+    DSP_ATTACKMODE_HID, DSP_ATTACKMODE_OFF, /* STORAGE is refused, loudly              */
+    DSP_SAVE_ATTACKMODE, DSP_RESTORE_ATTACKMODE,
+    DSP_EXFIL,                              /* append a value to the loot file         */
+    DSP_NOP                                 /* accepted and deliberately does nothing  */
+} ducky_special_t;
 
 /* Target OS for the Unicode "type anything" input method. */
 typedef enum { OS_WINDOWS = 0, OS_LINUX, OS_MAC } target_os_t;
@@ -46,11 +61,13 @@ typedef struct {
     uint16_t consumer;  /* CONSUMER (media) usage code                */
     uint8_t  wait_mask; /* WAIT: which lock LED (HID_LED_*)           */
     uint8_t  wait_want; /* WAIT: 0=off 1=on 2=change                  */
+    uint8_t  special;   /* SPECIAL: ducky_special_t                   */
+    char     text[40];  /* SPECIAL: EXFIL payload / mode argument      */
 } ducky_action_t;
 
 typedef struct {
     uint32_t    default_delay_ms;/* inserted between commands (DEFAULTDELAY) */
-    char        last_cmd[160];   /* remembered for REPEAT                    */
+    char        last_cmd[2048];   /* remembered for REPEAT                    */
     int         repeat;          /* pending REPEAT count (player consumes)   */
     kb_layout_t layout;          /* target keyboard layout for STRING/chars  */
     target_os_t target_os;       /* OS for Unicode (STRING non-ASCII/UNICODE)*/

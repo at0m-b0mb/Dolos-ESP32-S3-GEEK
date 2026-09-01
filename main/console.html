@@ -1,325 +1,404 @@
 <!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Dolos Console</title>
 <style>
+/* ── tokens ──────────────────────────────────────────────────────────── */
 :root{
-  --bg:#0a0810;--bg2:#140b12;--card:#1a0f18;--card2:#20131e;--rim:#33202e;
-  --ink:#efe6ee;--dim:#a98fa4;--dimmer:#6f5866;--accent:#e6465a;--accent2:#ff6274;
-  --green:#3cc882;--amber:#f0b43c;--red:#f0545f;--blue:#5aa0ff;
-  --shadow:0 10px 40px rgba(0,0,0,.45);
+  --bg:#0b0710; --surface:#160d16; --surface2:#1e131e; --rim:#33202e; --rim2:#452b3c;
+  --ink:#f3ecf2; --dim:#b39dae; --faint:#7a6472;
+  --brand:#e6465a; --brand2:#ff6274; --brandDim:#7d2233;
+  --ok:#3ddc84; --warn:#f5b53c; --danger:#ff5566; --info:#63a6ff;
+  --r:14px; --rs:10px; --pad:16px;
+  --shadow:0 8px 28px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box;min-width:0}
-html,body{margin:0;height:100%;max-width:100%;overflow-x:hidden}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{background:radial-gradient(130% 90% at 50% -10%,#3a1220 0%,#160c14 46%,#0a0810 100%) fixed;
-  color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+html,body{margin:0;height:100%;max-width:100%;overflow-x:hidden}
+body{
+  background:radial-gradient(120% 80% at 50% -20%,#3a1220 0%,#1a0d16 45%,var(--bg) 100%) fixed;
+  color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+h1,h2,h3{margin:0}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
-a{color:var(--accent2)}
-button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:.7em 1.1em;font-weight:600;min-height:44px;
-  background:linear-gradient(180deg,var(--accent),#b52640);color:#fff;transition:transform .07s,opacity .2s}
-button:hover{transform:translateY(-1px)}button:disabled{opacity:.4;cursor:not-allowed;transform:none}
-button.ghost{background:#2a1622;color:var(--ink);border:1px solid var(--rim)}
-button.warn{background:linear-gradient(180deg,var(--amber),#b9860f);color:#231600}
-input,textarea,select{font:inherit;background:#120810;color:var(--ink);border:1px solid var(--rim);
-  border-radius:10px;padding:.6em .7em;width:100%;transition:border-color .15s,box-shadow .15s}
-input:focus,textarea:focus,select:focus{outline:0;border-color:var(--accent);
-  box-shadow:0 0 0 3px rgba(230,70,90,.18)}
-button:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
-button:active{transform:translateY(1px)}
-textarea{resize:vertical;min-height:220px}
-.mono textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
-label{display:block;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase;color:var(--dimmer);margin:0 0 .35em}
 
-/* login */
-#login{min-height:100%;display:grid;place-items:center;padding:24px}
-.logincard{width:100%;max-width:360px;background:linear-gradient(180deg,var(--card2),var(--card));
-  border:1px solid var(--rim);border-radius:20px;padding:30px 26px;box-shadow:var(--shadow)}
-.brand{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:6px}
-.kbd{width:46px;height:34px;border-radius:8px;background:linear-gradient(180deg,#ff5c72,#b52640);position:relative;flex:0 0 auto}
-.kbd::before{content:"";position:absolute;inset:8px 7px;border-radius:3px;
-  background:radial-gradient(circle at 6px 6px,#160810 1.6px,transparent 1.7px) 0 0/9px 8px}
-h1{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;margin:0;font-size:1.7rem}
-.tag{text-align:center;color:var(--dim);font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;margin:.2em 0 22px}
+/* ── controls ────────────────────────────────────────────────────────── */
+button{
+  font:inherit;font-weight:600;cursor:pointer;border:0;border-radius:var(--rs);
+  padding:.7em 1.1em;min-height:44px;
+  background:linear-gradient(180deg,var(--brand),#b52640);color:#fff;
+  transition:transform .06s,filter .15s,opacity .15s;
+}
+button:hover{filter:brightness(1.08)} button:active{transform:translateY(1px)}
+button:disabled{opacity:.38;cursor:not-allowed;transform:none;filter:none}
+button:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
+.b-ghost{background:#2a1826;color:var(--ink);border:1px solid var(--rim2)}
+.b-quiet{background:transparent;color:var(--dim);border:1px solid var(--rim);min-height:38px;padding:.45em .85em}
+.b-danger{background:linear-gradient(180deg,var(--danger),#a02233)}
+.b-warn{background:linear-gradient(180deg,var(--warn),#b9820f);color:#241800}
+.b-sm{min-height:36px;padding:.35em .8em;font-size:.86rem}
+
+input,textarea,select{
+  font:inherit;width:100%;color:var(--ink);background:#120a12;
+  border:1px solid var(--rim2);border-radius:var(--rs);padding:.62em .75em;
+  transition:border-color .15s,box-shadow .15s;
+}
+input:focus,textarea:focus,select:focus{
+  outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(230,70,90,.16);
+}
+textarea{resize:vertical;min-height:200px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+label.lbl{display:block;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--faint);margin:0 0 .4em;font-weight:600}
+
+.sw{position:relative;width:50px;height:29px;flex:0 0 auto;border-radius:999px;
+  background:#2a1622;border:1px solid var(--rim2);cursor:pointer;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;
+  background:var(--faint);transition:transform .16s,background .16s}
+.sw.on{background:linear-gradient(180deg,var(--brand),#b52640);border-color:transparent}
+.sw.on::after{transform:translateX(21px);background:#fff}
+
+/* ── login ───────────────────────────────────────────────────────────── */
+#login{min-height:100dvh;display:grid;place-items:center;padding:24px}
+.loginCard{width:100%;max-width:370px;background:linear-gradient(180deg,var(--surface2),var(--surface));
+  border:1px solid var(--rim);border-radius:20px;padding:32px 26px;box-shadow:var(--shadow)}
+.brandRow{display:flex;align-items:center;gap:12px;justify-content:center}
+.mark{width:44px;height:32px;border-radius:8px;flex:0 0 auto;position:relative;
+  background:linear-gradient(180deg,#ff5c72,#b52640)}
+.mark::before{content:"";position:absolute;inset:7px 6px;border-radius:3px;
+  background:radial-gradient(circle at 6px 5px,#170811 1.5px,transparent 1.6px) 0 0/9px 8px}
+.wordmark{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.18em;font-size:1.6rem}
+.sub{text-align:center;color:var(--dim);font-size:.74rem;letter-spacing:.16em;
+  text-transform:uppercase;margin:.5em 0 24px}
 .field{margin-bottom:14px}
-.err{color:var(--red);font-size:.86rem;min-height:1.2em;margin-top:4px}
-.note{color:var(--dimmer);font-size:.74rem;text-align:center;margin-top:16px}
+.err{color:var(--danger);font-size:.86rem;min-height:1.2em;margin-top:6px;text-align:center}
+.legal{color:var(--faint);font-size:.72rem;text-align:center;margin-top:18px;line-height:1.6}
 
-/* app */
-#app{display:none;max-width:1000px;margin:0 auto;padding:18px 18px 60px}
-.top{display:flex;align-items:center;gap:12px;margin-bottom:18px;position:sticky;top:0;z-index:10;
-  padding:12px 0;background:linear-gradient(180deg,#140b12 70%,rgba(20,11,18,0));backdrop-filter:blur(8px)}
-.top .kbd{width:34px;height:26px}
-.top h1{font-size:1.3rem}
-.spacer{flex:1}
-.chip{font-size:.74rem;padding:.3em .7em;border-radius:999px;border:1px solid var(--rim);background:#241019;color:var(--dim)}
-.chip.admin{color:var(--accent2);border-color:#5a2131}
+/* ── shell ───────────────────────────────────────────────────────────── */
+#app{display:none;max-width:900px;margin:0 auto;padding:0 var(--pad) 90px}
+.topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;padding:12px 0 10px;
+  background:linear-gradient(180deg,#150c14 72%,rgba(21,12,20,0));backdrop-filter:blur(10px)}
+.topbar .mark{width:30px;height:23px}
+.topbar .wordmark{font-size:1.05rem}
+.grow{flex:1}
+.chip{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
+  padding:.32em .7em;border-radius:999px;border:1px solid var(--rim2);color:var(--dim);background:#241019}
+.chip.admin{color:var(--brand2);border-color:var(--brandDim)}
 
-.grid{display:grid;gap:16px;grid-template-columns:1fr}
-@media(min-width:760px){.grid.two{grid-template-columns:1fr 1fr}}
-.card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--rim);
-  border-radius:16px;padding:18px;box-shadow:var(--shadow)}
-.card h2{margin:0 0 14px;font-size:.82rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.nav{display:flex;gap:6px;overflow-x:auto;padding:0 0 12px;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav button{background:#1d1220;border:1px solid var(--rim);color:var(--dim);font-weight:600;
+  min-height:38px;padding:.4em .95em;font-size:.9rem;white-space:nowrap}
+.nav button.on{background:linear-gradient(180deg,var(--brand),#b52640);color:#fff;border-color:transparent}
 
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:10px}
-.tile{background:#120810;border:1px solid var(--rim);border-radius:12px;padding:11px 12px}
-.tile .k{font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dimmer)}
-.tile .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.05rem;margin-top:3px;
-  overflow-wrap:anywhere;word-break:break-word}
-.state{font-weight:700}
-.s-SAFE{color:var(--green)}.s-ARMED,.s-PIN{color:var(--amber)}
-.s-FIRING,.s-RUNNING{color:var(--red)}.s-SENT{color:var(--blue)}
+.card{background:linear-gradient(180deg,var(--surface2),var(--surface));border:1px solid var(--rim);
+  border-radius:var(--r);padding:var(--pad);box-shadow:var(--shadow);margin-bottom:14px}
+.card > h2{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:12px}
+.hint{color:var(--faint);font-size:.8rem;line-height:1.45}
 
-.rf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:12px;border-radius:12px;
-  background:#160a10;border:1px solid var(--rim)}
-.rf.on{border-color:var(--red);background:#25090e;box-shadow:0 0 0 1px rgba(240,80,95,.4) inset}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer)}
-.rf.on .dot{background:var(--red);box-shadow:0 0 10px var(--red)}
+/* status */
+.state{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.pill{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.45rem;font-weight:700;letter-spacing:.06em;
+  padding:.16em .58em;border-radius:var(--rs);background:#100a10;border:1px solid var(--rim2)}
+.s-SAFE{color:var(--ok);border-color:#1e5c39} .s-ARMED,.s-PIN{color:var(--warn);border-color:#5d4715}
+.s-FIRING,.s-RUNNING{color:var(--danger);border-color:#5e2028} .s-SENT{color:var(--info);border-color:#22406e}
+.s-SETTINGS,.s-CONSOLE{color:var(--info);border-color:#22406e}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin-top:12px}
+.fact{background:#110a11;border:1px solid var(--rim);border-radius:var(--rs);padding:9px 11px}
+.fact .k{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.fact .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.96rem;margin-top:3px;overflow-wrap:anywhere}
+.bar{height:6px;border-radius:999px;background:#241420;overflow:hidden;margin-top:10px}
+.bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand2));
+  transition:width .25s}
 
-.set{display:flex;align-items:center;gap:12px;padding:.7em 0;border-bottom:1px solid #241420}
+/* fire control */
+.fire{border:1px solid var(--rim2);border-radius:var(--r);padding:13px;background:#150a11}
+.fire.live{border-color:var(--danger);background:#25090e;box-shadow:0 0 0 1px rgba(255,85,102,.28) inset}
+.fireHead{display:flex;align-items:center;gap:11px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:0 0 auto}
+.fire.live .dot{background:var(--danger);box-shadow:0 0 10px var(--danger)}
+.btns{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+
+/* settings groups */
+.group{border:1px solid var(--rim);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
+.group > h3{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+  background:#1b1019;padding:10px 13px;border-bottom:1px solid var(--rim)}
+.set{display:flex;align-items:center;gap:13px;padding:12px 13px;border-bottom:1px solid #241420}
 .set:last-child{border-bottom:0}
-.set .lbl{flex:1 1 auto;min-width:0}
-.set .lbl b{display:block;font-weight:600}
-.set .lbl span{color:var(--dim);font-size:.78rem}
-.set select,.set input[type=number],.set input[type=text]{width:auto;min-width:132px;flex:0 0 auto}
-.sw{position:relative;width:52px;height:30px;flex:0 0 auto;border-radius:999px;background:#2a1622;
-  border:1px solid var(--rim);cursor:pointer;transition:background .15s}
-.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;
-  background:var(--dim);transition:transform .15s,background .15s}
-.sw.on{background:linear-gradient(180deg,var(--accent),#b52640);border-color:transparent}
-.sw.on::after{transform:translateX(22px);background:#fff}
-.savebar{position:sticky;bottom:0;background:linear-gradient(180deg,rgba(26,15,24,0),var(--card) 40%);
-  padding-top:14px;margin-top:6px}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
-.tabs button{background:#20131e;border:1px solid var(--rim);color:var(--dim);font-weight:600}
-.tabs button.active{background:linear-gradient(180deg,var(--accent),#b52640);color:#fff;border-color:transparent}
-.plist{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
-.plist .item{display:flex;justify-content:space-between;align-items:center;gap:8px;background:#120810;
-  overflow-wrap:anywhere;
-  border:1px solid var(--rim);border-radius:10px;padding:.5em .7em;cursor:pointer}
-.plist .item.active{border-color:var(--accent);color:var(--accent2);
-  box-shadow:0 0 0 1px rgba(230,70,90,.35) inset}
-.plist .item .badge{font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;
-  padding:.2em .5em;border-radius:6px;background:var(--accent);color:#fff}
-.empty{color:var(--dimmer);text-align:center;padding:22px 10px;font-size:.9rem}
-.card h2{display:flex;align-items:center;gap:8px}
-.log{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
-  background:#0d0509;border:1px solid var(--rim);border-radius:10px;padding:12px;max-height:340px;overflow:auto;color:#cbb6c4}
+.set .txt{flex:1 1 auto}
+.set .txt b{display:block;font-weight:600;font-size:.94rem}
+.set .txt span{color:var(--faint);font-size:.77rem;display:block;margin-top:2px;line-height:1.35}
+.set select,.set input[type=number]{width:auto;min-width:132px;flex:0 0 auto}
+
+/* lists */
+.list{display:flex;flex-direction:column;gap:7px}
+.item{display:flex;align-items:center;gap:10px;background:#110a11;border:1px solid var(--rim);
+  border-radius:var(--rs);padding:.6em .75em;cursor:pointer;transition:border-color .12s}
+.item:hover{border-color:var(--rim2)}
+.item.on{border-color:var(--brand);box-shadow:0 0 0 1px rgba(230,70,90,.3) inset}
+.item .nm{flex:1;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+.badge{font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;
+  padding:.24em .5em;border-radius:5px;background:var(--brand);color:#fff}
+.badge.role{background:#2a1826;color:var(--dim);border:1px solid var(--rim2)}
+.empty{color:var(--faint);text-align:center;padding:26px 12px;font-size:.9rem;line-height:1.6}
+.log{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:12.5px;background:#0d060c;border:1px solid var(--rim);border-radius:var(--rs);
+  padding:12px;max-height:330px;overflow:auto;color:#cbb6c4}
+.danger{border:1px solid #5e2028;border-radius:var(--r);padding:13px;background:#1c0a0f;margin-top:6px}
+.danger h3{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--danger);margin-bottom:6px}
+
 .hidden{display:none!important}
-.sessionbar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:none;gap:12px;
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);
+  background:#241624;border:1px solid var(--rim2);padding:.75em 1.15em;border-radius:var(--rs);
+  box-shadow:var(--shadow);opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;
+  z-index:50;max-width:88vw;text-align:center;font-size:.92rem}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.sessionbar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;gap:12px;
   align-items:center;justify-content:center;flex-wrap:wrap;padding:.85em 1em;
-  background:linear-gradient(180deg,#3a2408,#2a1a06);border-top:1px solid var(--amber);
-  color:var(--ink);box-shadow:0 -8px 24px rgba(0,0,0,.5)}
+  background:linear-gradient(180deg,#3a2408,#2a1a06);border-top:1px solid var(--warn)}
 .sessionbar.show{display:flex}
-.sessionbar b{color:var(--amber)}
-.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#20131e;border:1px solid var(--rim);
-  padding:.7em 1.1em;border-radius:10px;box-shadow:var(--shadow);opacity:0;transition:opacity .2s;pointer-events:none}
-.toast.show{opacity:1}
+.sessionbar b{color:var(--warn)}
 </style></head>
 <body>
 
-<!-- LOGIN -->
+<!-- ══ LOGIN ══ -->
 <section id="login">
-  <div class="logincard">
-    <div class="brand"><span class="kbd"></span><h1>DOLOS</h1></div>
-    <div class="tag">Secure Console</div>
-    <div class="field"><label>Username</label><input id="u" autocomplete="username" autofocus></div>
-    <div class="field"><label>Password</label><input id="p" type="password" autocomplete="current-password"></div>
+  <div class="loginCard">
+    <div class="brandRow"><span class="mark"></span><h1 class="wordmark">DOLOS</h1></div>
+    <div class="sub">Secure Console</div>
+    <div class="field"><label class="lbl" for="u">Username</label>
+      <input id="u" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus></div>
+    <div class="field"><label class="lbl" for="p">Password</label>
+      <input id="p" type="password" autocomplete="current-password"></div>
     <button id="loginBtn" style="width:100%">Sign in</button>
     <div class="err" id="loginErr"></div>
-    <div class="note">Authorized security testing only.</div>
+    <div class="legal">Credentials are shown on the device screen.<br>Authorized security testing only.</div>
   </div>
 </section>
 
-<!-- APP -->
+<!-- ══ APP ══ -->
 <main id="app">
-  <div class="top">
-    <span class="kbd"></span><h1>DOLOS</h1>
-    <span class="spacer"></span>
+  <div class="topbar">
+    <span class="mark"></span><span class="wordmark">DOLOS</span>
+    <span class="grow"></span>
     <span class="chip" id="roleChip">—</span>
-    <button class="ghost" id="logoutBtn">Log out</button>
+    <button class="b-quiet" id="logoutBtn">Sign out</button>
   </div>
 
-  <div class="grid two">
+  <nav class="nav" id="nav">
+    <button data-s="overview" class="on">Overview</button>
+    <button data-s="payloads">Payloads</button>
+    <button data-s="settings" class="role-admin">Settings</button>
+    <button data-s="users" class="role-admin">Users</button>
+    <button data-s="audit">Audit</button>
+  </nav>
+
+  <section id="s-overview">
     <div class="card">
-      <h2>Status</h2>
-      <div class="tiles" id="tiles"></div>
-      <div class="rf" id="rf">
-        <span class="dot"></span>
-        <div style="flex:1"><b id="rfLabel">Remote fire disabled</b>
-          <div style="color:var(--dim);font-size:.8rem">Physical arming always works at the device.</div></div>
-        <button class="warn role-admin" id="rfToggle">Enable</button>
+      <h2>Device status</h2>
+      <div class="state">
+        <span class="pill" id="pill">—</span>
+        <div class="grow">
+          <div class="mono" id="stPayload" style="font-size:.95rem;overflow-wrap:anywhere">—</div>
+          <div class="hint" id="stProgress"></div>
+        </div>
       </div>
-      <div class="row role-operator" style="margin-top:12px">
-        <button id="armBtn" disabled>Arm &amp; fire remotely</button>
-        <button class="ghost" id="abortBtn">Abort</button>
-      </div>
+      <div class="bar"><i id="stBar"></i></div>
+      <div class="facts" id="facts"></div>
     </div>
 
-    <div class="card">
-      <h2>Console</h2>
-      <div class="tabs">
-        <button data-tab="payloads" class="active">Payloads</button>
-        <button data-tab="users" class="role-admin">Users</button>
-        <button data-tab="config" class="role-admin">Config</button>
-        <button data-tab="audit">Audit</button>
-      </div>
-
-      <div id="tab-payloads">
-        <div class="plist" id="plist"></div>
-        <div style="margin-top:12px" class="mono">
-          <label id="edName">Editor</label>
-          <textarea id="editor" spellcheck="false" placeholder="Select a payload to view/edit"></textarea>
+    <div class="card role-operator">
+      <h2>Fire control</h2>
+      <div class="fire" id="fire">
+        <div class="fireHead">
+          <span class="dot"></span>
+          <div class="grow">
+            <b id="rfLabel">Remote fire disabled</b>
+            <div class="hint">The physical BOOT button always works at the device. While
+              remote fire is on, the device shows a permanent banner.</div>
+          </div>
+          <button class="b-warn b-sm role-admin" id="rfToggle">Enable</button>
         </div>
-        <div class="row" style="margin-top:10px">
-          <input id="newName" placeholder="new-payload.txt" style="max-width:220px">
-          <button class="ghost role-admin" id="saveBtn">Save</button>
+        <div class="btns">
+          <button id="armBtn" disabled>Arm &amp; fire</button>
+          <button class="b-ghost" id="abortBtn">Abort</button>
         </div>
-      </div>
-
-      <div id="tab-users" class="hidden">
-        <div class="plist" id="ulist"></div>
-        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--rim)">
-          <label>Add or update an account</label>
-          <div class="row" style="margin-bottom:8px">
-            <input id="uName" placeholder="username" autocomplete="off" style="flex:1 1 130px">
-            <input id="uPass" type="password" placeholder="password (8+ chars)"
-                   autocomplete="new-password" style="flex:1 1 160px">
-          </div>
-          <div class="row">
-            <select id="uRole" style="flex:1 1 140px">
-              <option value="viewer">Viewer — status &amp; audit only</option>
-              <option value="operator">Operator — can select &amp; fire</option>
-              <option value="admin">Admin — full control</option>
-            </select>
-            <button id="uAdd">Save account</button>
-          </div>
-          <div style="color:var(--dimmer);font-size:.78rem;margin-top:10px">
-            An existing username has its password and role replaced. The last
-            administrator cannot be deleted.
-          </div>
-        </div>
-      </div>
-
-      <div id="tab-config" class="hidden">
-        <div id="setForm">
-          <div class="set">
-            <span class="lbl"><b>Keyboard layout</b><span>Layout of the TARGET machine</span></span>
-            <select data-key="layout">
-              <option value="us">US</option><option value="uk">UK</option>
-              <option value="de">DE (QWERTZ)</option><option value="fr">FR (AZERTY)</option>
-              <option value="es">ES</option><option value="it">IT</option>
-              <option value="pt">PT</option><option value="se">Nordic</option>
-              <option value="ch">CH</option><option value="latam">LatAm</option>
-            </select>
-          </div>
-          <div class="set">
-            <span class="lbl"><b>Target OS</b><span>Used for Unicode / non-ASCII characters</span></span>
-            <select data-key="os">
-              <option value="windows">Windows</option><option value="linux">Linux</option>
-              <option value="mac">macOS</option>
-            </select>
-          </div>
-          <div class="set">
-            <span class="lbl"><b>Typing speed</b><span>Slower is more reliable on busy hosts</span></span>
-            <select data-key="speed">
-              <option value="fast">Fast</option><option value="balanced">Balanced</option>
-              <option value="reliable">Reliable</option>
-            </select>
-          </div>
-          <div class="set">
-            <span class="lbl"><b>Default delay</b><span>Milliseconds between commands</span></span>
-            <input type="number" min="0" max="10000" step="10" data-key="defaultdelay">
-          </div>
-          <div class="set">
-            <span class="lbl"><b>Dry run</b><span>Step through a payload without typing anything</span></span>
-            <div class="sw" data-key="dryrun"></div>
-          </div>
-          <div class="set">
-            <span class="lbl"><b>Remote fire</b><span>Allow firing from this console. The device shows a banner while on.</span></span>
-            <div class="sw" data-key="remote_fire"></div>
-          </div>
-          <div class="set">
-            <span class="lbl"><b>Button lock</b><span>How much of the on-device menu the BOOT button can reach</span></span>
-            <select data-key="ui_lock">
-              <option value="off">Unlocked</option>
-              <option value="menu">No settings menu</option>
-              <option value="full">Locked (no menu, no payload switching)</option>
-            </select>
-          </div>
-          <div class="set">
-            <span class="lbl"><b>Wi-Fi console</b><span>Turning this off takes effect after a restart</span></span>
-            <div class="sw" data-key="wifi"></div>
-          </div>
-        </div>
-
-        <div class="savebar row">
-          <button id="setSave">Save to card</button>
-          <span id="setNote" style="color:var(--dim);font-size:.82rem"></span>
-        </div>
-        <div style="color:var(--dimmer);font-size:.78rem;margin-top:8px">
-          Settings apply immediately; saving only makes them survive a restart.
-          The Wi-Fi key and console password are never written to the card —
-          they stay in the device's own flash, because a card can be read on any
-          laptop.
-        </div>
-
-        <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--rim)">
-          <label>Danger zone</label>
-          <div style="color:var(--dim);font-size:.84rem;margin-bottom:8px">
-            Wipes the console credentials and saved settings, then restarts and
-            generates new ones. Payloads on the card are left alone.
-          </div>
-          <button class="warn" id="factoryBtn">Factory reset</button>
-        </div>
-      </div>
-
-      <div id="tab-audit" class="hidden">
-        <div class="row" style="margin-bottom:10px"><button class="ghost" id="auditRefresh">Refresh</button></div>
-        <div class="log" id="auditLog">—</div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <section id="s-payloads" class="hidden">
+    <div class="card">
+      <h2>Payloads on the card</h2>
+      <div class="list" id="plist"></div>
+      <div class="hint" style="margin-top:10px">Tap a payload to make it the active one on the device.</div>
+    </div>
+    <div class="card">
+      <h2 id="edName">Editor</h2>
+      <textarea id="editor" spellcheck="false" autocapitalize="none"
+                placeholder="Select a payload above to view or edit it."></textarea>
+      <div class="btns">
+        <input id="newName" placeholder="name.txt" style="flex:1 1 170px" autocapitalize="none" spellcheck="false">
+        <button class="b-ghost role-admin" id="saveBtn">Save</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-settings" class="hidden">
+    <div class="card">
+      <h2>Settings</h2>
+      <div class="hint" style="margin-bottom:14px">
+        Changes apply to the device immediately. <b>Save to card</b> only makes them survive a restart.
+      </div>
+
+      <div class="group">
+        <h3>Typing</h3>
+        <div class="set">
+          <span class="txt"><b>Keyboard layout</b><span>Layout of the machine being typed into</span></span>
+          <select data-key="layout">
+            <option value="us">US</option><option value="uk">UK</option>
+            <option value="de">German</option><option value="fr">French</option>
+            <option value="es">Spanish</option><option value="it">Italian</option>
+            <option value="pt">Portuguese</option><option value="se">Nordic</option>
+            <option value="ch">Swiss</option><option value="latam">Latin American</option>
+          </select>
+        </div>
+        <div class="set">
+          <span class="txt"><b>Target OS</b><span>Only used for characters not on the layout</span></span>
+          <select data-key="os">
+            <option value="windows">Windows</option><option value="linux">Linux</option>
+            <option value="mac">macOS</option>
+          </select>
+        </div>
+        <div class="set">
+          <span class="txt"><b>Speed</b><span>Every profile is accurate; slower adds settle time</span></span>
+          <select data-key="speed">
+            <option value="fast">Fast</option><option value="balanced">Balanced</option>
+            <option value="reliable">Reliable</option>
+          </select>
+        </div>
+        <div class="set">
+          <span class="txt"><b>Default delay</b><span>Milliseconds between commands</span></span>
+          <input type="number" min="0" max="10000" step="10" data-key="defaultdelay">
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Safety</h3>
+        <div class="set">
+          <span class="txt"><b>Dry run</b><span>Step through a payload without sending a single keystroke</span></span>
+          <div class="sw" data-key="dryrun"></div>
+        </div>
+        <div class="set">
+          <span class="txt"><b>Button lock</b><span>How much of the on-device menu the BOOT button can reach</span></span>
+          <select data-key="ui_lock">
+            <option value="off">Unlocked</option>
+            <option value="menu">No settings menu</option>
+            <option value="full">Locked — one job only</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Wireless</h3>
+        <div class="set">
+          <span class="txt"><b>Wi-Fi console</b><span>Turning this off takes effect after a restart</span></span>
+          <div class="sw" data-key="wifi"></div>
+        </div>
+        <div class="set">
+          <span class="txt"><b>Remote fire</b><span>Lets this console fire. The device shows a banner while on.</span></span>
+          <div class="sw" data-key="remote_fire"></div>
+        </div>
+      </div>
+
+      <div class="btns">
+        <button id="setSave">Save to card</button>
+        <span class="hint" id="setNote" style="align-self:center"></span>
+      </div>
+
+      <div class="danger">
+        <h3>Danger zone</h3>
+        <div class="hint" style="margin-bottom:10px">
+          This <b>restarts the device</b> and changes the Wi-Fi key, so this console
+          will disconnect. The new credentials appear on the device screen.
+          Payloads on the card are never touched.
+        </div>
+        <button class="b-danger" id="factoryBtn">Factory reset</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="s-users" class="hidden">
+    <div class="card">
+      <h2>Accounts</h2>
+      <div class="list" id="ulist"></div>
+      <div class="hint" style="margin-top:10px">
+        <b>Viewer</b> sees status and the audit log. <b>Operator</b> can also select and
+        fire payloads. <b>Admin</b> can change everything. The last admin cannot be deleted.
+      </div>
+    </div>
+    <div class="card">
+      <h2>Add or update an account</h2>
+      <div class="field"><label class="lbl" for="uName">Username</label>
+        <input id="uName" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+      <div class="field"><label class="lbl" for="uPass">Password</label>
+        <input id="uPass" type="password" autocomplete="new-password" placeholder="at least 8 characters"></div>
+      <div class="field"><label class="lbl" for="uRole">Role</label>
+        <select id="uRole">
+          <option value="viewer">Viewer</option>
+          <option value="operator">Operator</option>
+          <option value="admin">Admin</option>
+        </select></div>
+      <button id="uAdd" style="width:100%">Save account</button>
+      <div class="hint" style="margin-top:10px">Reusing a username replaces its password and role.</div>
+    </div>
+  </section>
+
+  <section id="s-audit" class="hidden">
+    <div class="card">
+      <h2>Engagement log</h2>
+      <div class="btns" style="margin:0 0 11px"><button class="b-ghost b-sm" id="auditRefresh">Refresh</button></div>
+      <div class="log" id="auditLog">—</div>
+    </div>
+  </section>
 </main>
 
 <div class="sessionbar" id="sessionBar">
   <span>Signing out in <b id="sessionLeft">–</b></span>
-  <button id="stayBtn">Stay signed in</button>
+  <button class="b-sm" id="stayBtn">Stay signed in</button>
 </div>
-
 <div class="toast" id="toast"></div>
 
 <script>
-let CSRF="",ROLE="none",curPayload="";
+let CSRF="",ROLE="none",ACTIVE="";
 const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
-const toast=(m)=>{const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800)};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let toastT;
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2400);}
+
 async function api(path,opt={}){
   opt.credentials="same-origin";opt.headers=opt.headers||{};
   if(opt.method&&opt.method!=="GET")opt.headers["X-CSRF"]=CSRF;
   const r=await fetch(path,opt);
-  if(r.status===401){show("login");}
+  if(r.status===401)show("login");
   return r;
 }
-function show(v){$("#login").style.display=v==="login"?"grid":"none";$("#app").style.display=v==="app"?"block":"none";}
-/* The server enforces permissions on every endpoint; this only stops the UI
-   offering buttons that would be refused. The two must agree, so the classes
-   mirror the roles exactly: viewer < operator < admin. */
+async function errOf(r){try{const j=await r.json();return j.err||null;}catch(e){return null;}}
+function show(v){$("#login").style.display=v==="login"?"grid":"none";
+                 $("#app").style.display=v==="app"?"block":"none";}
+
+/* The server enforces permissions on every endpoint; hiding controls here only
+   avoids offering buttons that would be refused. Null-guarded throughout: this
+   runs on the login path, and one missing element must never cost a session. */
 function applyRole(){
   const rank={none:0,viewer:1,operator:2,admin:3}[ROLE]||0;
   $$(".role-admin").forEach(e=>e.style.display=rank>=3?"":"none");
   $$(".role-operator").forEach(e=>e.style.display=rank>=2?"":"none");
-  const chip=$("#roleChip");
-  if(chip){chip.textContent=ROLE;chip.classList.toggle("admin",rank>=3);}
-  /* A viewer may look at everything it is allowed to see, but changes nothing.
-     Null-guarded on purpose: this runs on the login path, and a reference to an
-     element that no longer exists used to throw here, abort applyRole(), and
-     leave the browser sitting on the login screen after a login the device had
-     already accepted. One missing element must never cost you the session. */
+  const chip=$("#roleChip"); if(chip){chip.textContent=ROLE;chip.classList.toggle("admin",rank>=3);}
   const ed=$("#editor"); if(ed) ed.readOnly=rank<3;
-  const cf=$("#cfg");    if(cf) cf.readOnly=rank<3;
 }
 
-// login
 $("#loginBtn").onclick=async()=>{
   $("#loginErr").textContent="";
   const body=`user=${encodeURIComponent($("#u").value)}&pass=${encodeURIComponent($("#p").value)}`;
@@ -327,96 +406,151 @@ $("#loginBtn").onclick=async()=>{
     headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
   if(r.ok){
     const j=await r.json();CSRF=j.csrf;ROLE=j.role;
-    /* Show the console FIRST. Cosmetic setup must not be able to strand you on
-       the login page after the device has already granted the session. */
-    show("app");
-    try{applyRole();}catch(e){console.error("applyRole",e);}
-    try{boot();}catch(e){console.error("boot",e);}
+    show("app");                        /* switch view FIRST */
+    try{applyRole();}catch(e){console.error(e);}
+    try{boot();}catch(e){console.error(e);}
+  }else{
+    $("#loginErr").textContent = r.status===429
+      ? "Too many attempts — locked briefly." : "Incorrect username or password.";
   }
-  else{const j=await r.json().catch(()=>({}));$("#loginErr").textContent=
-    r.status===429?"Too many attempts — locked, wait a moment.":"Invalid credentials.";}
 };
-$("#p").addEventListener("keydown",e=>{if(e.key==="Enter")$("#loginBtn").click()});
-$("#logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});location.reload()};
+$("#p").addEventListener("keydown",e=>{if(e.key==="Enter")$("#loginBtn").click();});
+$("#logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});location.reload();};
 
-// status
-const TILES=[["mode","MODE","state"],["payload","PAYLOAD"],["layout","LAYOUT"],
-  ["speed","SPEED"],["usb","USB"],["leds","LEDS"]];
 function renderStatus(s){
-  $("#tiles").innerHTML=TILES.map(([k,lab,cls])=>{
-    let v=s[k];
-    if(k==="usb")v=s.usb?"link":"—";
-    if(k==="payload")v=(s.count>1?`${s.idx}/${s.count} `:"")+s.payload;
-    if(k==="leds"){const b=s.leds||0;v=((b&2)?"C":"·")+((b&1)?"N":"·")+((b&4)?"S":"·");}
-    const c=cls?`state s-${s.mode}`:"";
-    return `<div class="tile"><div class="k">${lab}</div><div class="v ${c}">${v}</div></div>`;
-  }).join("");
-  const on=!!s.remote_fire;const rf=$("#rf");rf.classList.toggle("on",on);
+  const pill=$("#pill"); pill.textContent=s.mode; pill.className="pill s-"+s.mode;
+  $("#stPayload").textContent=(s.count>1?`${s.idx}/${s.count}  `:"")+(s.payload||"—");
+  const running = s.mode==="RUNNING"||s.mode==="FIRING";
+  $("#stProgress").textContent = running && s.lines
+      ? `line ${s.cur} of ${s.lines}` : (s.dry?"Dry run — nothing will be typed":"");
+  $("#stBar").style.width = (running && s.lines>0 ? Math.min(100,Math.round(s.cur*100/s.lines)) : 0)+"%";
+
+  const leds=s.leds||0;
+  $("#facts").innerHTML=[
+    ["Layout",s.layout],["Speed",s.speed],
+    ["USB",s.usb?"connected":"no host"],
+    ["Lock keys",((leds&2)?"C":"·")+((leds&1)?"N":"·")+((leds&4)?"S":"·")],
+  ].map(([k,v])=>`<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+
+  const on=!!s.remote_fire;
+  $("#fire").classList.toggle("live",on);
   $("#rfLabel").textContent=on?"REMOTE FIRE ENABLED":"Remote fire disabled";
   $("#rfToggle").textContent=on?"Disable":"Enable";
-  $("#armBtn").disabled=!on||!(ROLE==="admin"||ROLE==="operator");
+  const rank={none:0,viewer:1,operator:2,admin:3}[ROLE]||0;
+  $("#armBtn").disabled=!on||rank<2;
+  ACTIVE=s.payload||"";
 }
-/* Warn before the idle timeout logs someone out mid-edit. Polling status does
-   not extend the session on purpose - only pressing the button does. */
-const WARN_AT=180;                        /* seconds left when the bar appears */
+
+const WARN_AT=180;
 function renderSession(secs){
   const bar=$("#sessionBar");
   if(secs===undefined||secs===null){bar.classList.remove("show");return;}
   if(secs<=WARN_AT){
     const m=Math.floor(secs/60),s2=secs%60;
-    $("#sessionLeft").textContent=m>0?(m+"m "+String(s2).padStart(2,"0")+"s"):(s2+"s");
+    $("#sessionLeft").textContent=m>0?`${m}m ${String(s2).padStart(2,"0")}s`:`${s2}s`;
     bar.classList.add("show");
-  } else bar.classList.remove("show");
+  }else bar.classList.remove("show");
 }
 $("#stayBtn").onclick=async()=>{
   const r=await api("/api/extend",{method:"POST"});
-  if(r.ok){const j=await r.json().catch(()=>({}));renderSession(j.session_s);toast("Session extended");}
-  else toast("Could not extend - please sign in again");
+  if(r.ok){const j=await r.json();renderSession(j.session_s);toast("Session extended");}
+  else toast("Could not extend — please sign in again");
 };
-async function poll(){try{const r=await api("/api/status");
-  if(r.ok){const j=await r.json();window.__status=j;renderStatus(j);renderSession(j.session_s);}}catch(e){}}
+async function poll(){try{
+  const r=await api("/api/status");
+  if(r.ok){const j=await r.json();renderStatus(j);renderSession(j.session_s);}
+}catch(e){}}
 
-// payloads
+$("#rfToggle").onclick=async()=>{
+  const on=$("#fire").classList.contains("live");
+  await api("/api/remotefire",{method:"POST",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"enable="+(on?0:1)});
+  poll();
+};
+$("#armBtn").onclick=async()=>{
+  if(!confirm("Fire the selected payload into the connected computer now?"))return;
+  const r=await api("/api/arm",{method:"POST"});
+  toast(r.ok?"Firing — abortable at the device":(await errOf(r)||"Arm refused"));
+};
+$("#abortBtn").onclick=async()=>{await api("/api/abort",{method:"POST"});toast("Abort sent");};
+
 async function loadPayloads(){
-  const r=await api("/api/payloads");if(!r.ok)return;const j=await r.json();
-  const active=(window.__status&&window.__status.payload)||"";
-  $("#plist").innerHTML=(j.payloads||[]).map(n=>
-    `<div class="item ${n===active?"active":""}" data-n="${n}">`+
-    `<span class="mono" style="overflow-wrap:anywhere">${n}</span>`+
-    (n===active?'<span class="badge">Active</span>':'<span style="color:var(--dimmer)">›</span>')+
-    `</div>`
-  ).join("")||'<div class="empty">No payloads on the SD card.<br>Add a .txt file to get started.</div>';
+  const r=await api("/api/payloads"); if(!r.ok)return;
+  const list=(await r.json()).payloads||[];
+  $("#plist").innerHTML = list.length ? list.map(n=>
+    `<div class="item ${n===ACTIVE?"on":""}" data-n="${esc(n)}">
+       <span class="nm">${esc(n)}</span>
+       ${n===ACTIVE?'<span class="badge">Active</span>':'<span style="color:var(--faint)">›</span>'}
+     </div>`).join("")
+    : '<div class="empty">No payloads on the card.<br>Add a <b>.txt</b> file to get started.</div>';
   $$("#plist .item").forEach(el=>el.onclick=()=>openPayload(el.dataset.n));
 }
 async function openPayload(n){
-  curPayload=n;const r=await api("/api/payload?name="+encodeURIComponent(n));
-  $("#editor").value=r.ok?await r.text():"";$("#edName").textContent="Editor — "+n;$("#newName").value=n;
-  /* also make it the ACTIVE payload on the device, not just in this editor */
+  const r=await api("/api/payload?name="+encodeURIComponent(n));
+  $("#editor").value=r.ok?await r.text():"";
+  $("#edName").textContent="Editor — "+n;
+  $("#newName").value=n;
   const s=await api("/api/select?name="+encodeURIComponent(n),{method:"POST"});
-  if(s.ok){toast("Selected "+n+" on the device");poll();}
-  else{const j=await s.json().catch(()=>({}));toast(j.err||"Could not select it on the device");}
+  if(s.ok){ACTIVE=n;toast("Selected "+n);poll();}
+  else toast(await errOf(s)||"Could not select it on the device");
   loadPayloads();
 }
 $("#saveBtn").onclick=async()=>{
-  const n=$("#newName").value.trim();if(!n){toast("Name required");return;}
+  const n=$("#newName").value.trim(); if(!n){toast("A filename is required");return;}
   const r=await api("/api/payload?name="+encodeURIComponent(n),{method:"PUT",body:$("#editor").value});
-  toast(r.ok?"Saved "+n:"Save failed");if(r.ok){curPayload=n;loadPayloads();}
+  toast(r.ok?"Saved "+n:(await errOf(r)||"Save failed"));
+  if(r.ok)loadPayloads();
 };
 
-// users
+function renderSettings(j){
+  $$('[data-key]').forEach(el=>{
+    const k=el.dataset.key;
+    const v = k==="remote_fire"?j.remotefire : k==="ui_lock"?j.uilock : j[k];
+    if(el.classList.contains("sw")) el.classList.toggle("on",!!v);
+    else el.value=(v===undefined||v===null)?"":v;
+  });
+  $("#setNote").textContent = j.sd ? "" : "No card — changes apply now but cannot be saved.";
+  $("#setSave").disabled=!j.sd;
+}
+async function setSetting(key,value){
+  const r=await api("/api/settings",{method:"POST",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"},
+    body:`key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}`});
+  if(r.ok){renderSettings(await r.json());toast("Applied");poll();}
+  else{toast(await errOf(r)||"Could not apply");loadSettings();}
+}
+async function loadSettings(){const r=await api("/api/settings");if(r.ok)renderSettings(await r.json());}
+$$('[data-key]').forEach(el=>{
+  if(el.classList.contains("sw"))
+    el.onclick=()=>{if(ROLE!=="admin")return;setSetting(el.dataset.key,el.classList.contains("on")?"off":"on");};
+  else el.onchange=()=>setSetting(el.dataset.key,el.value);
+});
+$("#setSave").onclick=async()=>{
+  const r=await api("/api/settings/save",{method:"POST"});
+  toast(r.ok?"Saved to DOLOS.CFG":(await errOf(r)||"Save failed"));
+};
+$("#factoryBtn").onclick=async()=>{
+  if(!confirm("Factory reset?\n\nThe device restarts and generates a new Wi-Fi key and password. "+
+              "You will be disconnected and must rejoin using the credentials on its screen."))return;
+  const r=await api("/api/factory_reset",{method:"POST"});
+  toast(r.ok?"Resetting — rejoin with the new key shown on the device":"Reset refused");
+};
+
 async function loadUsers(){
   const r=await api("/api/users"); if(!r.ok)return;
-  const j=await r.json();
-  $("#uAdd").disabled=(j.users||[]).length>=(j.max||4);
-  $("#ulist").innerHTML=(j.users||[]).map(u=>
-    `<div class="item"><span><b>${u.name}</b> <span style="color:var(--dim)">${u.role}</span></span>`+
-    `<button class="ghost" data-del="${u.name}" style="min-height:34px;padding:.3em .8em">Delete</button></div>`
-  ).join("")||'<div class="empty">No accounts.</div>';
-  $$("#ulist [data-del]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Delete the account \""+b.dataset.del+"\"?"))return;
+  const j=await r.json(), us=j.users||[];
+  $("#uAdd").disabled = us.length>=(j.max||4);
+  $("#ulist").innerHTML = us.length ? us.map(u=>
+    `<div class="item"><span class="nm">${esc(u.name)}</span>
+       <span class="badge role">${esc(u.role)}</span>
+       <button class="b-quiet b-sm" data-del="${esc(u.name)}">Delete</button></div>`).join("")
+    : '<div class="empty">No accounts.</div>';
+  $$("#ulist [data-del]").forEach(b=>b.onclick=async ev=>{
+    ev.stopPropagation();
+    if(!confirm(`Delete the account "${b.dataset.del}"?`))return;
     const d=await api("/api/users?name="+encodeURIComponent(b.dataset.del),{method:"DELETE"});
-    if(d.ok){toast("Deleted");loadUsers();}
-    else{const j2=await d.json().catch(()=>({}));toast(j2.err||"Could not delete");}
+    toast(d.ok?"Deleted":(await errOf(d)||"Could not delete"));
+    if(d.ok)loadUsers();
   });
 }
 $("#uAdd").onclick=async()=>{
@@ -426,72 +560,27 @@ $("#uAdd").onclick=async()=>{
     headers:{"Content-Type":"application/x-www-form-urlencoded"},
     body:`user=${encodeURIComponent(n)}&pass=${encodeURIComponent(p)}&role=${rl}`});
   if(r.ok){toast("Saved "+n);$("#uName").value="";$("#uPass").value="";loadUsers();}
-  else{const j=await r.json().catch(()=>({}));toast(j.err||"Could not save");}
+  else toast(await errOf(r)||"Could not save");
 };
 
-// config + audit
-/* Settings apply the moment you change them, so the device behaves as the
-   screen says immediately; "Save to card" is only about surviving a reboot. */
-function renderSettings(j){
-  $$('#setForm [data-key]').forEach(el=>{
-    const k=el.dataset.key;
-    let v = k==="remote_fire" ? j.remotefire : k==="ui_lock" ? j.uilock : j[k];
-    if(el.classList.contains("sw")) el.classList.toggle("on",!!v);
-    else el.value = (v===undefined||v===null) ? "" : v;
-  });
-  $("#setNote").textContent = j.sd ? "" : "No SD card — changes apply now but cannot be saved.";
-  $("#setSave").disabled = !j.sd;
+async function loadAudit(){
+  const r=await api("/api/audit");
+  $("#auditLog").textContent = r.ok ? ((await r.text())||"No runs recorded yet.") : "—";
 }
-async function setSetting(key,value){
-  const r=await api("/api/settings",{method:"POST",
-    headers:{"Content-Type":"application/x-www-form-urlencoded"},
-    body:`key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}`});
-  if(r.ok){renderSettings(await r.json());toast("Applied");poll();}
-  else{const j=await r.json().catch(()=>({}));toast(j.err||"Could not apply");loadConfig();}
-}
-async function loadConfig(){const r=await api("/api/settings");if(r.ok)renderSettings(await r.json());}
-$$('#setForm [data-key]').forEach(el=>{
-  if(el.classList.contains("sw"))
-    el.onclick=()=>{ if(ROLE!=="admin")return; setSetting(el.dataset.key, el.classList.contains("on")?"off":"on"); };
-  else
-    el.onchange=()=>setSetting(el.dataset.key, el.value);
-});
-$("#setSave").onclick=async()=>{
-  const r=await api("/api/settings/save",{method:"POST"});
-  if(r.ok)toast("Saved to DOLOS.CFG");
-  else{const j=await r.json().catch(()=>({}));toast(j.err||"Save failed");}
-};
-$("#factoryBtn").onclick=async()=>{
-  if(!confirm("Factory reset?\n\nThe Wi-Fi key and admin password will be replaced. "+
-              "You will be disconnected and must rejoin using the new credentials "+
-              "shown on the device screen (Settings > Console info)."))return;
-  const r=await api("/api/factory_reset",{method:"POST"});
-  toast(r.ok?"Reset - device restarting":"Reset refused");
-};
-async function loadAudit(){const r=await api("/api/audit");$("#auditLog").textContent=r.ok?(await r.text()||"No runs recorded yet."):"—";}
 $("#auditRefresh").onclick=loadAudit;
 
-// remote fire + arm
-$("#rfToggle").onclick=async()=>{const on=$("#rfLabel").textContent.includes("ENABLED");
-  await api("/api/remotefire",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"enable="+(on?0:1)});poll();};
-$("#armBtn").onclick=async()=>{if(!confirm("Fire the selected payload on the target now?"))return;
-  const r=await api("/api/arm",{method:"POST"});
-  if(r.ok){toast("Firing — abortable at the device");}
-  else{const j=await r.json().catch(()=>({}));toast(j.err||"Arm refused");}};
-$("#abortBtn").onclick=async()=>{await api("/api/abort",{method:"POST"});toast("Abort sent");};
-
-// tabs
-$$(".tabs button").forEach(b=>b.onclick=()=>{
-  $$(".tabs button").forEach(x=>x.classList.remove("active"));b.classList.add("active");
-  ["payloads","users","config","audit"].forEach(t=>$("#tab-"+t).classList.toggle("hidden",t!==b.dataset.tab));
-  if(b.dataset.tab==="config")loadConfig();
-  if(b.dataset.tab==="audit")loadAudit();
-  if(b.dataset.tab==="users")loadUsers();
+const SECTIONS=["overview","payloads","settings","users","audit"];
+$$("#nav button").forEach(b=>b.onclick=()=>{
+  $$("#nav button").forEach(x=>x.classList.remove("on")); b.classList.add("on");
+  SECTIONS.forEach(s=>$("#s-"+s).classList.toggle("hidden",s!==b.dataset.s));
+  if(b.dataset.s==="payloads")loadPayloads();
+  if(b.dataset.s==="settings")loadSettings();
+  if(b.dataset.s==="users")loadUsers();
+  if(b.dataset.s==="audit")loadAudit();
+  window.scrollTo({top:0,behavior:"smooth"});
 });
 
-function boot(){loadPayloads();poll();setInterval(poll,3000);}
-// try to resume an existing session
-(async()=>{const r=await fetch("/api/status",{credentials:"same-origin"});
-  if(r.ok){/* cookie valid but we lack csrf -> require re-login for writes */show("login");}else show("login");})();
+function boot(){poll();loadPayloads();setInterval(poll,3000);}
+show("login");
 </script>
 </body></html>

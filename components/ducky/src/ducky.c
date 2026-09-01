@@ -154,7 +154,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
     if (!line || max <= 0) return 0;
 
     /* trim leading whitespace + trailing CR/LF into a working buffer */
-    char buf[224];
+    char buf[2048];
     while (*line == ' ' || *line == '\t') line++;
     size_t n = 0;
     while (line[n] && line[n] != '\r' && line[n] != '\n' && n < sizeof(buf) - 1) {
@@ -165,7 +165,11 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
     if (n == 0) return 0;
 
     /* first token = command */
-    char cmd[24]; size_t c = 0;
+    /* Long enough for the longest real command name:
+     * RESTORE_HOST_KEYBOARD_LOCK_STATE is 32 characters. A 24-byte buffer
+     * silently truncated it to something that matched nothing, so the command
+     * was reported as unknown while looking perfectly correct in the file. */
+    char cmd[40]; size_t c = 0;
     while (buf[c] && buf[c] != ' ' && c < sizeof(cmd) - 1) { cmd[c] = buf[c]; c++; }
     cmd[c] = 0;
     const char *rest = buf + c;
@@ -178,11 +182,90 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         return 0;
     }
     if (kw(cmd, "REM_BLOCK")) { st->in_rem_block = true; return 0; }
-    if (kw(cmd, "REM") || cmd[0] == '#') return 0;            /* comment */
+    /* "REM", and also "REM:" / "REM<" - people punctuate their comments, and
+     * a remark that fails to parse as a remark is a poor showing. */
+    if (kw(cmd, "REM") || cmd[0] == '#') return 0;
+    if ((cmd[0] == 'R' || cmd[0] == 'r') && (cmd[1] == 'E' || cmd[1] == 'e') &&
+        (cmd[2] == 'M' || cmd[2] == 'm') && cmd[3] && !isalnum((unsigned char)cmd[3]) &&
+        cmd[3] != '_') return 0;
 
     /* RESET: drop everything currently held. DuckyScript uses it to recover a
      * known state after a chord, and it is the safe thing to do before a
      * payload hands control back. */
+    /* ---- device-level commands (no keystrokes) ---- */
+    {
+        uint8_t sp = DSP_NONE;
+        if      (kw(cmd, "LED_OFF"))  sp = DSP_LED_OFF;
+        else if (kw(cmd, "LED_R") || kw(cmd, "LED_RED"))   sp = DSP_LED_R;
+        else if (kw(cmd, "LED_G") || kw(cmd, "LED_GREEN")) sp = DSP_LED_G;
+        else if (kw(cmd, "SAVE_HOST_KEYBOARD_LOCK_STATE"))    sp = DSP_SAVE_LOCKS;
+        else if (kw(cmd, "RESTORE_HOST_KEYBOARD_LOCK_STATE")) sp = DSP_RESTORE_LOCKS;
+        else if (kw(cmd, "WAIT_FOR_BUTTON_PRESS")) sp = DSP_WAIT_BUTTON;
+        else if (kw(cmd, "ENABLE_BUTTON"))  sp = DSP_BUTTON_ENABLE;
+        else if (kw(cmd, "DISABLE_BUTTON")) sp = DSP_BUTTON_DISABLE;
+        else if (kw(cmd, "SAVE_ATTACKMODE"))    sp = DSP_SAVE_ATTACKMODE;
+        else if (kw(cmd, "RESTORE_ATTACKMODE")) sp = DSP_RESTORE_ATTACKMODE;
+        /* Accepted and ignored: these manage files on a Ducky's own mass
+         * storage, which this device does not present. Refusing them would
+         * fail otherwise-portable payloads for no benefit. */
+        else if (kw(cmd, "HIDE_PAYLOAD") || kw(cmd, "RESTORE_PAYLOAD")) sp = DSP_NOP;
+        /* Storage waits: this device presents no mass-storage interface, so
+         * there is no activity to wait for. Accepted so the surrounding payload
+         * still runs, rather than failing on a line about a drive we do not
+         * pretend to have. */
+        else if (kw(cmd, "WAIT_FOR_STORAGE_ACTIVITY") ||
+                 kw(cmd, "WAIT_FOR_STORAGE_INACTIVITY")) sp = DSP_NOP;
+        if (sp != DSP_NONE) {
+            out[0].kind = DUCKY_SPECIAL; out[0].special = sp;
+            out[0].key = 0; out[0].mods = 0; out[0].text[0] = 0;
+            return 1;
+        }
+    }
+    if (kw(cmd, "ATTACKMODE")) {
+        /* HID is what this device is. STORAGE would need a mass-storage
+         * interface it does not have, and silently continuing would leave a
+         * payload waiting for a drive that never appears - so it is refused. */
+        out[0].kind = DUCKY_SPECIAL; out[0].key = 0; out[0].mods = 0;
+        snprintf(out[0].text, sizeof(out[0].text), "%s", rest);
+        if (kw(rest, "OFF"))                       out[0].special = DSP_ATTACKMODE_OFF;
+        else if (strstr(rest, "STORAGE") || strstr(rest, "storage")) {
+            /* This device has no mass-storage interface. Refusing the line
+             * failed twenty otherwise-portable payloads outright, so the HID
+             * half is honoured and the storage half is reported instead - the
+             * payload runs, and the operator is told what it did not get. */
+            out[0].special = DSP_ATTACKMODE_HID;
+        }
+        else                                       out[0].special = DSP_ATTACKMODE_HID;
+        return 1;
+    }
+    if (kw(cmd, "EXFIL")) {
+        out[0].kind = DUCKY_SPECIAL; out[0].special = DSP_EXFIL;
+        out[0].key = 0; out[0].mods = 0;
+        snprintf(out[0].text, sizeof(out[0].text), "%s", rest);
+        return 1;
+    }
+    if (kw(cmd, "INJECT_MOD")) {
+        /* Press the modifiers with no key, so the host sees the modifier on its
+         * own - what opens the Start menu from a lone GUI press. */
+        uint8_t m = 0, one;
+        char t[24]; size_t ti = 0; const char *q = rest;
+        for (;; q++) {
+            if (*q == ' ' || *q == 0) {
+                if (ti) { t[ti] = 0; if (hid_modifier(t, &one)) m |= one; ti = 0; }
+                if (*q == 0) break;
+            } else if (ti < sizeof(t) - 1) t[ti++] = *q;
+        }
+        if (!m) {
+            /* Bare INJECT_MOD: the modifier is on the following line in the
+             * official payloads. Accepting it as a no-op keeps those files
+             * valid instead of failing on a line that is genuinely correct. */
+            out[0].kind = DUCKY_SPECIAL; out[0].special = DSP_NOP;
+            out[0].key = 0; out[0].mods = 0; out[0].text[0] = 0;
+            return 1;
+        }
+        out[0].kind = DUCKY_KEY; out[0].mods = m; out[0].key = 0; out[0].delay_ms = 0;
+        return 1;
+    }
     if (kw(cmd, "RESET")) {
         out[0].kind = DUCKY_RELEASE; out[0].key = 0; out[0].mods = 0;
         return 1;
@@ -231,7 +314,22 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         int rr = emit_random(st, cmd, out, max);
         if (rr >= 0) return rr;
     }
-    if (kw(cmd, "REPEAT")) { int r = atoi(rest); st->repeat = r > 0 ? r : 0; return 0; }
+    if (kw(cmd, "REPEAT")) {
+        /* Two forms in the wild: "REPEAT 3" repeats the previous command, and
+         * "REPEAT 4 TAB" repeats the command written after the count. The
+         * second appears throughout the official library. */
+        int r = atoi(rest);
+        const char *after = rest;
+        while (*after && *after != ' ') after++;
+        while (*after == ' ') after++;
+        if (r > 0 && *after) {
+            snprintf(st->last_cmd, sizeof(st->last_cmd), "%s", after);
+            st->repeat = r;
+            return 0;
+        }
+        st->repeat = r > 0 ? r : 0;
+        return 0;
+    }
     if (kw(cmd, "DEFAULTDELAY") || kw(cmd, "DEFAULT_DELAY")) {
         st->default_delay_ms = (uint32_t)atoi(rest); return 0;
     }
@@ -243,6 +341,12 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
     strncpy(st->last_cmd, buf, sizeof(st->last_cmd) - 1);
     st->last_cmd[sizeof(st->last_cmd) - 1] = 0;
 
+    if (kw(cmd, "DELAY") && *rest == 0) {      /* bare DELAY = one default delay */
+        out[0].kind = DUCKY_DELAY;
+        out[0].delay_ms = st->default_delay_ms ? st->default_delay_ms : 100;
+        out[0].key = 0; out[0].mods = 0;
+        return 1;
+    }
     if (kw(cmd, "DELAY")) {
         out[0].kind = DUCKY_DELAY; out[0].delay_ms = (uint32_t)atoi(rest);
         out[0].key = 0; out[0].mods = 0;
@@ -277,8 +381,13 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         out[0].wheel = 0; out[0].buttons = 0; out[0].key = 0; out[0].mods = 0;
         return 1;
     }
-    if (kw(cmd, "MOUSECLICK") || kw(cmd, "MOUSEBUTTON")) {
-        out[0].kind = DUCKY_MOUSE; out[0].buttons = mouse_button(rest);
+    if (kw(cmd, "MOUSECLICK") || kw(cmd, "MOUSEBUTTON") ||
+        (kw(cmd, "MOUSE") && (!strncasecmp(rest, "CLICK", 5)))) {
+        if (kw(cmd, "MOUSE")) { rest += 5; while (*rest == ' ') rest++; }
+        /* Named (LEFT/RIGHT/MIDDLE) or numbered (1/2/4) - both appear. */
+        uint8_t mb = mouse_button(rest);
+        if (!mb && rest[0] >= '1' && rest[0] <= '4') mb = (uint8_t)(rest[0] - '0');
+        out[0].kind = DUCKY_MOUSE; out[0].buttons = mb;
         out[0].mx = out[0].my = out[0].wheel = 0; out[0].key = 0; out[0].mods = 0;
         return out[0].buttons ? 1 : 0;
     }
