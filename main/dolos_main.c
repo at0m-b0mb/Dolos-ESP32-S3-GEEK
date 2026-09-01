@@ -92,6 +92,8 @@ static uint8_t           g_crashes;   /* consecutive crashed boots */
 static uint32_t          g_boot_ms;
 static char              g_admin_pw_show[20];
 
+static bool wifi_bring_up(void);   /* defined with the boot path, below */
+
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static void lock(void)   { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void unlock(void) { if (s_lock) xSemaphoreGive(s_lock); }
@@ -251,6 +253,12 @@ static bool config_save(void)
 /* Apply the settings that can take effect without a restart. */
 static void config_apply_live(void)
 {
+    /* The Wi-Fi setting used to change nothing until the next boot, while the
+     * console screen reported the radio as off and told the operator to enable
+     * it in settings - where it already was. Apply it here instead. */
+    if (s_cfg.wifi_on && !g_wifi_up)      wifi_bring_up();
+    else if (!s_cfg.wifi_on && g_wifi_up) { net_wifi_stop_ap(); g_wifi_up = false; }
+
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
     g_remote_fire_enabled = s_cfg.remote_fire;
     load_selected();          /* re-lint: layout/OS changes can fix or break a payload */
@@ -782,6 +790,25 @@ static void gen_secret(char *out, size_t len)
  * this firmware would share it, and the whole point of having a screen is that
  * the device can show you a unique secret instead. Anything set in DOLOS.CFG
  * wins, so an operator can still pin their own. */
+/* Bring the access point (and, on a clean boot, the console) up. Shared by the
+ * boot path and the settings toggle so the two can never drift apart. The HTTP
+ * server is started once per boot: its handlers are registered globally, so
+ * re-registering them on a second call would be a leak, not a restart. */
+static bool wifi_bring_up(void)
+{
+    if (g_wifi_up) return true;
+    if (!net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass)) return false;
+    g_wifi_up = true;
+    if (!g_console_up && g_crashes == 0) {
+        if (console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {
+            g_console_up = true;
+            if (!s_cfg.admin_pass[0])
+                strncpy(g_admin_pw_show, console_admin_password(), sizeof(g_admin_pw_show) - 1);
+        }
+    }
+    return true;
+}
+
 static void ensure_credentials(void)
 {
     /* NOTE ON ENTROPY.
@@ -878,15 +905,8 @@ void app_main(void)
      * only a second one drops the radio entirely. The screen names the stage,
      * so a single power cycle says where the fault is. */
     if (s_cfg.wifi_on && g_crashes < 2) {
-        if (net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass)) {
-            g_wifi_up = true;
-            if (g_crashes == 0) {
-                if (console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {
-                    g_console_up = true;
-                    if (!s_cfg.admin_pass[0])
-                        strncpy(g_admin_pw_show, console_admin_password(), sizeof(g_admin_pw_show) - 1);
-                }
-            } else {
+        if (wifi_bring_up()) {
+            if (g_crashes != 0) {
                 ESP_LOGW(TAG, "previous boot crashed - access point only, no HTTP console");
             }
         }

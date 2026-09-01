@@ -188,8 +188,22 @@ static void draw_fit(canvas_t *cv, int x, int y, const char *s,
 static void draw_info(canvas_t *cv, const dui_state_t *st)
 {
     if (!st->wifi_on) {
-        cv_text_center(cv, W / 2, 56, "WIFI CONSOLE IS OFF", DU_DIM, -1, 1);
-        cv_text_center(cv, W / 2, 74, "ENABLE IT IN SETTINGS", DU_DIM, -1, 1);
+        /* Say WHY, and never give advice that is already done. Telling an
+         * operator to "enable it in settings" when it IS enabled there sends
+         * them to look at a switch that is already on. */
+        bool wanted = st->cfg && st->cfg->wifi_on;
+        if (!wanted) {
+            big_center(cv, W / 2, 50, "CONSOLE OFF", DU_DIM, 1);
+            cv_text_center(cv, W / 2, 78, "TURN IT ON IN SETTINGS", DU_DIM, -1, 1);
+        } else if (st->safe_boot || st->degraded) {
+            big_center(cv, W / 2, 44, "RADIO OFF", DU_ARMED, 1);
+            cv_text_center(cv, W / 2, 72, "A PREVIOUS BOOT CRASHED", DU_DIM, -1, 1);
+            cv_text_center(cv, W / 2, 86, "POWER-CYCLE TO RETRY", DU_DIM, -1, 1);
+        } else {
+            big_center(cv, W / 2, 44, "RADIO OFF", DU_ARMED, 1);
+            cv_text_center(cv, W / 2, 72, "IT IS ON IN SETTINGS BUT", DU_DIM, -1, 1);
+            cv_text_center(cv, W / 2, 86, "COULD NOT START", DU_DIM, -1, 1);
+        }
         return;
     }
 

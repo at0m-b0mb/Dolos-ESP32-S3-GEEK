@@ -13,4 +13,9 @@
 bool net_wifi_start_ap(const char *ssid, const char *pass);
 const char *net_wifi_ssid(void);   /* actual SSID in use (for the LCD)  */
 bool net_wifi_active(void);
+
+/* Take the access point down again. Turning the console off in the settings
+ * used to change nothing until the next boot, while the screen claimed it was
+ * off - so the setting now actually does what it says. */
+void net_wifi_stop_ap(void);
 #endif

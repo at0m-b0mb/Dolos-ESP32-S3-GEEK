@@ -56,5 +56,13 @@ bool net_wifi_start_ap(const char *ssid, const char *pass)
     return true;
 }
 
+void net_wifi_stop_ap(void)
+{
+    if (!s_active) return;
+    esp_wifi_stop();
+    s_active = false;
+    ESP_LOGW(TAG, "SoftAP stopped");
+}
+
 const char *net_wifi_ssid(void) { return s_ssid; }
 bool net_wifi_active(void) { return s_active; }

@@ -185,4 +185,28 @@ TEST_MAIN_BEGIN
         dui_render_notice(&cv, "X", NULL, NULL);
         CHECK(cv.oob == 0, "a notice with no body still renders");
     }
+
+    SUITE("dui: the console screen says WHY the radio is off");
+    {
+        dolos_config_t c5; config_defaults(&c5);
+        st.mode = DUI_INFO; st.cfg = &c5; st.wifi_on = false;
+        st.safe_boot = false; st.degraded = false;
+
+        /* genuinely switched off - the advice is correct */
+        c5.wifi_on = false;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "off-in-settings screen fits");
+
+        /* switched ON but not running: telling the operator to enable it in
+         * settings would send them to a switch that is already on */
+        c5.wifi_on = true;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "on-but-not-running screen fits");
+
+        /* and after a crash the reason is the crash, not the setting */
+        st.safe_boot = true;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "safe-boot screen fits");
+        st.safe_boot = false;
+    }
 TEST_MAIN_END
