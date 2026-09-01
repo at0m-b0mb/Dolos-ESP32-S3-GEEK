@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "dolos_main.c" "display.c" "usb_hid.c" "payload.c"
+    SRCS "dolos_main.c" "display.c" "usb_hid.c" "usb_msc.c" "payload.c"
          "net_wifi.c" "console_server.c"
     INCLUDE_DIRS "."
     REQUIRES ducky ui dconsole esp_tinyusb fatfs sdmmc esp_driver_sdspi

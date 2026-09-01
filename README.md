@@ -144,6 +144,27 @@ Those are **generated on this device at first boot** and kept in NVS — there i
 
 > Security *logic* is host-unit-tested; the on-device server + WiFi are compile-verified and pending hardware bring-up. Transport is WPA2 in v0.3; per-device HTTPS is next. See [`examples/DOLOS.CFG`](examples/DOLOS.CFG).
 
+## 💾 Shared storage (`ATTACKMODE HID STORAGE`)
+
+Dolos presents a composite **keyboard + mass storage** device, so payloads that expect a Ducky's drive work. What it shares is deliberately **one partition, not the card**:
+
+| | |
+|---|---|
+| Partition 1 | Your payloads, audit log, boot log — **never exposed** |
+| Partition 2 | The share the host sees, sized by you |
+
+The USB sector arithmetic maps the host's sector 0 to the start of that partition, so the host **cannot address a byte outside it** — not by policy, but because there is nowhere else for the arithmetic to go.
+
+Nothing is exposed until a payload runs `ATTACKMODE HID STORAGE`. Until then the host is told the drive is empty, so it shows nothing. While it *is* exposed the firmware stops touching the card altogether (two writers on one filesystem corrupts it), and the screen carries a **`STORAGE SHARED`** banner for as long as it lasts — handing your card to another machine is not a silent act.
+
+Partition the card once:
+
+```bash
+diskutil partitionDisk /dev/diskN MBR FAT32 DOLOS 60% FAT32 SHARE 40%
+```
+
+Set `storage_partition=` in `DOLOS.CFG` if you want a different one. `EXFIL` writes to `LOOT.TXT` on the device's own partition.
+
 ## 🔄 Factory reset & 🔒 hardening
 
 **Factory reset** wipes the generated credentials and saved config, restarts, and mints fresh secrets (payloads are left alone). Two authorised routes: on the device via **Settings → FACTORY RESET**, or `POST /api/factory_reset` from an **admin** console session. This is the only reversal that exists — and it is on by default.

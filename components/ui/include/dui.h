@@ -48,6 +48,8 @@ typedef struct {
     const char *wifi_key;      /* AP passphrase to show on SAFE (NULL = hide) */
     const char *admin_user;    /* console username                            */
     const char *admin_pw;      /* console password (NULL to hide)             */
+    bool     storage_shared;   /* a partition is exposed to the host       */
+    int      storage_part;     /* which one                                */
     bool     remote_fire_enabled; /* admin allowed remote fire -> banner  */
     bool     admin_pw_masked;  /* hide the console password (already used)  */
     bool     info_big;         /* console screen: large credential view    */

@@ -3,6 +3,7 @@
 #include "ducky.h"
 #include "dscript.h"
 #include "hid_keys.h"
+#include "usb_msc.h"
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -122,6 +123,45 @@ static void ensure_numlock(const payload_ctx_t *ctx)
     vTaskDelay(pdMS_TO_TICKS(40));            /* let the host apply it */
 }
 
+/* Device-level state a payload can touch. */
+uint8_t  g_saved_leds;      /* SAVE_HOST_KEYBOARD_LOCK_STATE                */
+bool     g_saved_locks;
+volatile bool g_wait_button;/* WAIT_FOR_BUTTON_PRESS - cleared by the UI task */
+uint8_t  g_payload_led;     /* LED_R / LED_G / LED_OFF, shown on the screen  */
+
+/* EXFIL appends to a loot file on the card. Skipped while the host holds the
+ * storage window, because writing under it would corrupt the filesystem the
+ * host is using. */
+static void exfil_write(const char *text)
+{
+    if (usb_msc_exposed()) { ilog_note("  EXFIL skipped: host holds the storage\n"); return; }
+    FILE *fp = fopen("/sdcard/LOOT.TXT", "a");
+    if (!fp) { ilog_note("  EXFIL failed: no card\n"); return; }
+    fprintf(fp, "%s\n", text ? text : "");
+    fclose(fp);
+    ilog_note("  EXFIL wrote %u bytes\n", (unsigned)(text ? strlen(text) : 0));
+}
+
+/* Put the host's lock keys back the way they were. The locks live in the OS,
+ * so the only way to change them is to press the keys - and the only way to
+ * know the result is the LED report coming back. */
+static void restore_locks(const payload_ctx_t *ctx)
+{
+    const struct { uint8_t bit; uint8_t key; } L[] = {
+        { HID_LED_CAPSLOCK, HID_KEY_CAPS },
+        { HID_LED_NUMLOCK,  HID_KEY_NUMLOCK },
+        { HID_LED_SCROLL,   HID_KEY_SCROLLLOCK },
+    };
+    for (int i = 0; i < 3; i++) {
+        if (ctx->abort && *ctx->abort) return;
+        uint8_t now = usb_hid_leds();
+        if ((now & L[i].bit) == (g_saved_leds & L[i].bit)) continue;
+        usb_hid_tap(0, L[i].key);
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+    ilog_note("  RESTORE_HOST_KEYBOARD_LOCK_STATE -> 0x%02X\n", usb_hid_leds());
+}
+
 static int g_ilog_idx;    /* keystroke counter for the injection log */
 static int g_ilog_line;   /* payload line currently being played          */
 
@@ -162,6 +202,51 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
             ilog_note("  WAIT_FOR mask=0x%02X want=%u -> %s after %lums\n",
                       a2->wait_mask, a2->wait_want,
                       waited >= limit ? "TIMED OUT" : "satisfied", (unsigned long)waited);
+            continue;
+        }
+        if (a2->kind == DUCKY_SPECIAL) {
+            /* Device-level commands. In a dry run they are announced and not
+             * performed - the whole point of a dry run is that nothing about
+             * the machine changes. */
+            if (ctx->dry_run) { ilog_note("  [dry] special %u\n", a2->special); continue; }
+            switch (a2->special) {
+                case DSP_ATTACKMODE_STORAGE:
+                    /* Hand the shared partition to the host. The firmware stops
+                     * touching the card for as long as this lasts. */
+                    if (usb_msc_expose(true))
+                        ilog_note("  ATTACKMODE STORAGE: partition %d (%lu MB) exposed\n",
+                                  usb_msc_partition(), (unsigned long)usb_msc_size_mb());
+                    else
+                        ilog_note("  ATTACKMODE STORAGE: no shareable partition on the card\n");
+                    break;
+                case DSP_ATTACKMODE_HID:
+                case DSP_ATTACKMODE_OFF:
+                    usb_msc_expose(false);       /* take the card back */
+                    ilog_note("  ATTACKMODE: storage returned to the device\n");
+                    break;
+                case DSP_SAVE_LOCKS:
+                    g_saved_leds = usb_hid_leds();
+                    g_saved_locks = true;
+                    ilog_note("  SAVE_HOST_KEYBOARD_LOCK_STATE: 0x%02X\n", g_saved_leds);
+                    break;
+                case DSP_RESTORE_LOCKS:
+                    if (g_saved_locks) restore_locks(ctx);
+                    break;
+                case DSP_EXFIL:
+                    exfil_write(a2->text);
+                    break;
+                case DSP_LED_R: case DSP_LED_G: case DSP_LED_OFF:
+                    g_payload_led = (a2->special == DSP_LED_OFF) ? 0
+                                  : (a2->special == DSP_LED_R ? 1 : 2);
+                    break;
+                case DSP_WAIT_BUTTON:
+                    ilog_note("  WAIT_FOR_BUTTON_PRESS\n");
+                    g_wait_button = true;
+                    while (g_wait_button && !(ctx->abort && *ctx->abort))
+                        vTaskDelay(pdMS_TO_TICKS(20));
+                    break;
+                default: break;                  /* accepted, does nothing here */
+            }
             continue;
         }
         if (ctx->dry_run)              { vTaskDelay(pdMS_TO_TICKS(2)); continue; }  /* preview */

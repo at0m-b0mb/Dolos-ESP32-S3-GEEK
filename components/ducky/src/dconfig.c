@@ -83,7 +83,7 @@ bool config_key_known(const char *key)
 {
     static const char *KNOWN[] = {
         "layout", "os", "target_os", "speed", "dryrun", "defaultdelay",
-        "armpin", "pin", "ui_lock", "lock_ui",
+        "armpin", "pin", "ui_lock", "lock_ui", "storage_partition", "msc_partition",
         "usb_vid", "usb_pid", "usb_mfr", "usb_product",
         "wifi", "wifi_ssid", "ssid", "wifi_pass", "wifi_password",
         "admin_user", "admin_pass", "admin_password", "remote_fire",
@@ -136,6 +136,10 @@ void config_parse(const char *text, dolos_config_t *c)
         else if (ieq(key, "admin_user")) cfg_str(c->admin_user, sizeof(c->admin_user), val);
         else if (ieq(key, "admin_pass") || ieq(key, "admin_password")) cfg_str(c->admin_pass, sizeof(c->admin_pass), val);
         else if (ieq(key, "remote_fire")) c->remote_fire = truthy(val);
+        else if (ieq(key, "storage_partition") || ieq(key, "msc_partition")) {
+            int v = atoi(val);
+            if (v >= 1 && v <= 4) c->msc_partition = (uint8_t)v;
+        }
         else if (ieq(key, "ui_lock") || ieq(key, "lock_ui")) c->ui_lock = ui_lock_from_name(val);
         else if (ieq(key, "armpin") || ieq(key, "pin")) {
             size_t i = 0;

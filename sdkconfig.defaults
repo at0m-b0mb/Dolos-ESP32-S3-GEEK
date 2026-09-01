@@ -36,3 +36,8 @@ CONFIG_FREERTOS_HZ=1000
 # payloads contain) live in PSRAM. Internal RAM is what Wi-Fi, TinyUSB and the
 # HTTP server compete for, and starving it is what crashed this device before.
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# Mass storage, so ATTACKMODE HID STORAGE can expose one microSD partition to
+# the host. The MSC interface is always present in the descriptor; whether a
+# medium exists is decided at run time (see main/usb_msc.c).
+CONFIG_TINYUSB_MSC_ENABLED=y

@@ -43,6 +43,10 @@
 #include "net_wifi.h"
 #include "console_server.h"
 #include "console_bridge.h"
+#include "usb_msc.h"
+
+/* set by a payload waiting on WAIT_FOR_BUTTON_PRESS (see payload.c) */
+extern volatile bool g_wait_button;
 #include "sbuf.h"
 
 static const char *TAG = "dolos";
@@ -53,6 +57,7 @@ static const char *TAG = "dolos";
 #define COUNTDOWN_MS  3000u
 #define MAX_PAYLOADS  16
 
+static sdmmc_card_t *s_card;      /* retained for the storage window */
 static dui_mode_t   s_mode = DUI_SAFE;
 static bool         s_flash_mode, s_sd_ok;
 static dolos_config_t s_cfg;
@@ -110,8 +115,11 @@ static bool sd_mount(void)
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.gpio_cs = BOARD_SD_PIN_CS; slot.host_id = BOARD_SD_SPI_HOST;
     esp_vfs_fat_sdmmc_mount_config_t mc = { .format_if_mount_failed = false, .max_files = 4 };
-    sdmmc_card_t *card = NULL;
-    return esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot, &mc, &card) == ESP_OK;
+    if (esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot, &mc, &s_card) != ESP_OK) return false;
+    /* Keep the card handle: the mass-storage window reads and writes sectors
+     * directly, below the filesystem, so it needs the device rather than the
+     * mount point. */
+    return true;
 }
 
 static bool ends_txt(const char *n)
@@ -212,6 +220,9 @@ static void bootlog_close(void)
 static void audit_write(bool aborted)
 {
     if (!s_sd_ok) return;
+    /* Two writers on one filesystem corrupts it. While the host has the
+     * storage window, the card is not ours to write to. */
+    if (usb_msc_exposed()) { ESP_LOGW(TAG, "audit entry skipped: host holds the storage"); return; }
     FILE *fp = fopen("/sdcard/DOLOS_AUDIT.LOG", "a");
     if (!fp) return;
     fprintf(fp, "run=%lu up_ms=%lu payload=%s lines=%d result=%s dry=%d layout=%s speed=%s\n",
@@ -528,6 +539,9 @@ static void ui_task(void *arg)
 
     for (;;) {
         btn_evt_t e = button_event();
+        /* A payload waiting on WAIT_FOR_BUTTON_PRESS is released by any press,
+         * and that press does nothing else - it belongs to the payload. */
+        if (g_wait_button && e != BTN_NONE) { g_wait_button = false; e = BTN_NONE; }
         uint32_t t = now_ms();
 
         /* admin-gated remote requests from the console (physical arming is
@@ -689,6 +703,8 @@ static void ui_task(void *arg)
          * missing, so the flag was permanently false and the password stayed on
          * screen no matter how many times someone logged in. */
         st.admin_pw_masked = g_console_used && !s_info_reveal;
+        st.storage_shared = usb_msc_exposed();
+        st.storage_part = usb_msc_partition();
         st.wifi_key = g_wifi_up ? s_cfg.wifi_pass : NULL;
         st.admin_user = s_cfg.admin_user[0] ? s_cfg.admin_user : "admin";
         st.lint_problems = s_lint_problems;
@@ -880,6 +896,9 @@ void app_main(void)
         scan_payloads();
     }
     bootlog_open();
+    /* Work out which partition could be shared, but do not share it: nothing is
+     * exposed until a payload asks with ATTACKMODE STORAGE. */
+    if (s_sd_ok) usb_msc_init(s_card, s_cfg.msc_partition);
     load_selected();
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
 

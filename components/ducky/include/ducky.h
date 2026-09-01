@@ -41,7 +41,7 @@ typedef enum {
     DSP_SAVE_LOCKS, DSP_RESTORE_LOCKS,      /* host CAPS/NUM/SCROLL state             */
     DSP_WAIT_BUTTON,                        /* halt until BOOT is pressed             */
     DSP_BUTTON_ENABLE, DSP_BUTTON_DISABLE,
-    DSP_ATTACKMODE_HID, DSP_ATTACKMODE_OFF, /* STORAGE is refused, loudly              */
+    DSP_ATTACKMODE_HID, DSP_ATTACKMODE_STORAGE, DSP_ATTACKMODE_OFF,
     DSP_SAVE_ATTACKMODE, DSP_RESTORE_ATTACKMODE,
     DSP_EXFIL,                              /* append a value to the loot file         */
     DSP_NOP                                 /* accepted and deliberately does nothing  */

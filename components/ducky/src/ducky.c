@@ -251,13 +251,8 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         out[0].kind = DUCKY_SPECIAL; out[0].key = 0; out[0].mods = 0;
         copy_bounded(out[0].text, sizeof(out[0].text), rest);
         if (kw(rest, "OFF"))                       out[0].special = DSP_ATTACKMODE_OFF;
-        else if (strstr(rest, "STORAGE") || strstr(rest, "storage")) {
-            /* This device has no mass-storage interface. Refusing the line
-             * failed twenty otherwise-portable payloads outright, so the HID
-             * half is honoured and the storage half is reported instead - the
-             * payload runs, and the operator is told what it did not get. */
-            out[0].special = DSP_ATTACKMODE_HID;
-        }
+        else if (strstr(rest, "STORAGE") || strstr(rest, "storage"))
+            out[0].special = DSP_ATTACKMODE_STORAGE;
         else                                       out[0].special = DSP_ATTACKMODE_HID;
         return 1;
     }

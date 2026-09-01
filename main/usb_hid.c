@@ -22,12 +22,21 @@ static const uint8_t s_hid_report[] = {
     TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(RID_CONSUMER)),
 };
 
-#define DOLOS_CFG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
+/* Composite: keyboard + mass storage, which is what ATTACKMODE HID STORAGE
+ * describes. The MSC interface is always in the descriptor because interfaces
+ * cannot be added after enumeration - what changes at run time is whether the
+ * drive reports a medium. Until a payload asks for storage the host is told the
+ * slot is empty, so it shows nothing and mounts nothing. */
+#define DOLOS_CFG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_MSC_DESC_LEN)
+#define ITF_NUM_HID  0
+#define ITF_NUM_MSC  1
 static const uint8_t s_config[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, DOLOS_CFG_TOTAL_LEN,
+    TUD_CONFIG_DESCRIPTOR(1, 2, 0, DOLOS_CFG_TOTAL_LEN,
                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_HID_DESCRIPTOR(0, 4, HID_ITF_PROTOCOL_NONE, sizeof(s_hid_report),
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 4, HID_ITF_PROTOCOL_NONE, sizeof(s_hid_report),
                        0x81, 16, 1),
+    /* string index 5, OUT 0x02 / IN 0x82, 64-byte packets */
+    TUD_MSC_DESCRIPTOR(ITF_NUM_MSC, 5, 0x02, 0x82, 64),
 };
 
 /* String + device descriptors are filled from config so the USB identity can be
@@ -35,7 +44,8 @@ static const uint8_t s_config[] = {
  * "Dolos". */
 static char s_mfr[24]  = "Dolos";
 static char s_prod[32] = "Dolos HID Keyboard";
-static const char *s_strdesc[5] = { (const char[]){0x09, 0x04}, s_mfr, s_prod, "000001", "Dolos HID" };
+static const char *s_strdesc[6] = { (const char[]){0x09, 0x04}, s_mfr, s_prod, "000001",
+                                   "Dolos HID", "Dolos Storage" };
 
 static tusb_desc_device_t s_dev = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE,
@@ -74,7 +84,7 @@ void usb_hid_init(uint16_t vid, uint16_t pid, const char *mfr, const char *produ
     const tinyusb_config_t cfg = {
         .device_descriptor = &s_dev,
         .string_descriptor = s_strdesc,
-        .string_descriptor_count = 5,
+        .string_descriptor_count = 6,
         .external_phy = false,
         .configuration_descriptor = s_config,
     };

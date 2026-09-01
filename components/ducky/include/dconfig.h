@@ -53,6 +53,7 @@ typedef struct {
     char          wifi_pass[64];  /* WPA2 passphrase (>=8, required) */
     char          admin_user[24]; /* console admin username          */
     char          admin_pass[32]; /* console admin password (blank = random on LCD) */
+    uint8_t       msc_partition; /* MBR partition shared by ATTACKMODE STORAGE */
     ui_lock_t     ui_lock;        /* how much of the UI the button may reach   */
     bool          remote_fire;    /* admin default for remote-fire allow (still visible) */
 } dolos_config_t;

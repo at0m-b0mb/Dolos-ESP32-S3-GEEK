@@ -375,7 +375,14 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
             big_center(cv, W / 2, 76, "TAP TO RETURN TO SAFE", DU_DIM, 1);
             break;
     }
-    if (st->remote_fire_enabled) draw_rf_banner(cv);
+    /* Handing the card to another machine is not a silent act. It gets the
+     * same standing banner as remote fire, for the same reason. */
+    if (st->storage_shared) {
+        cv_fill_rect(cv, 0, H - 25, W, 11, DU_ARMED);
+        char sb[40];
+        snprintf(sb, sizeof(sb), "STORAGE SHARED - PART %d", st->storage_part);
+        cv_text_center(cv, W / 2, H - 24, sb, DU_BG, -1, 1);
+    } else if (st->remote_fire_enabled) draw_rf_banner(cv);
     draw_header(cv, st);
     draw_footer(cv, st);
 }
