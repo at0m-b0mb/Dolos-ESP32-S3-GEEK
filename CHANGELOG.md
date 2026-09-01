@@ -7,6 +7,77 @@ Hardware brought the truth. This release is what a day of running the firmware
 on a real board, against a real host, actually found - plus DuckyScript 3, a
 proper international layout engine, and multi-user access control.
 
+### DuckyScript compatibility - measured, not asserted
+
+Verified against every payload in **hak5/usbrubberducky-payloads** (253 files),
+because the documentation and the payloads disagree about the language.
+
+| | Result |
+|---|---|
+| Payloads that lint clean | **252 / 253** |
+| Payloads that execute and type | **247** |
+
+The six that do not type are correct behaviour: three gate all their output
+behind `IF_DEFINED_TRUE #MACOS` or `IF ($_OS == WINDOWS)`, which cannot resolve
+without a real host, and three are `WHILE TRUE` by design (a game, a clicker, a
+menu). The single lint failure is a typo in Hak5's own payload (`DEFIN` for
+`DEFINE`), which this linter is right to report.
+
+Linting was not enough on its own. It proves a payload *parses*; it says nothing
+about whether it *runs*. An execution harness that drives the real interpreter
+over all 253 payloads and reconstructs the keystrokes scored **106/253** at a
+point when the linter said 98% - and every one of those failures was invisible
+to the linter.
+
+**`DEFINE` is a text macro, not an arithmetic assignment.** This one
+misunderstanding broke 136 of the 253 payloads:
+
+```
+DEFINE #SCRIPT_URL https://example.com/a.ps1
+DEFINE SUDO_PASS hunter2
+```
+
+The name is replaced by that *text* wherever it appears. Almost no `DEFINE` in
+the library holds a number. It is now a macro table expanded per line before
+anything else parses the line, which is what the Ducky toolchain does at compile
+time; a numeric `DEFINE` still works in arithmetic because the substituted text
+parses as a number.
+
+**Two truncation bugs of the same shape.** `char cmd[24]` silently cut command
+names, so `SAVE_HOST_KEYBOARD_LOCK_STATE` (29 characters) never matched anything
+and was reported as unknown while looking perfectly correct in the file. Variable
+names were capped at 16, so `$_HOST_CONFIGURATION_REQUEST_COUNT` (33) was split
+in two and its tail reported as an unknown variable.
+
+**Control-flow keywords are now case sensitive.** They are upper case in
+DuckyScript, and payloads routinely *type* lower-case PowerShell containing
+`if`, `while` and `return`. Matching those as control flow reported
+"IF without END_IF" against perfectly correct files.
+
+**The linter did not know about `STRING` blocks**, so it read half a shell script
+as commands and reported every line of it.
+
+Added, all from real usage: multi-line `STRING`/`STRINGLN` blocks including the
+`_BLOCK`/`_BASH`/`_POWERSHELL` spellings, `EXTENSION`, `IF_DEFINED_TRUE/FALSE`,
+`STAGE`, `BUTTON_DEF`, `INJECT_VAR`, `RESTART_PAYLOAD`/`STOP_PAYLOAD`/`EXIT`,
+`INJECT_MOD`, `LED_*`, `ATTACKMODE`, `SAVE`/`RESTORE_HOST_KEYBOARD_LOCK_STATE`,
+`WAIT_FOR_STORAGE_*`, `EXFIL`, keypad keys for ALT-code payloads, every `$_`
+system variable, `REPEAT n COMMAND`, constants in `DELAY`/`REPEAT`, punctuated
+`REM`, a UTF-8 BOM, calls to payload-defined functions, and function return
+values via `$X = FUNC()`.
+
+Lines up to 8 KB, sized from the corpus (the longest real line is a 6,468
+character base64 blob). Those buffers are deliberately not on the stack - an
+8 KB array in a function called from a 6 KB task is the overflow that took this
+device down earlier - and not in internal RAM either, since that is what Wi-Fi,
+TinyUSB and the HTTP server compete for. They live in PSRAM, leaving 160 KB of
+internal RAM free.
+
+**Known hardware limit:** `ATTACKMODE STORAGE` cannot be honoured. The GEEK has
+no mass-storage interface, so payloads that write loot to a Ducky's own drive
+run their HID half and find no drive. The command is accepted rather than
+failing the whole payload.
+
 ### Fixed - keystroke injection now types 100% accurately on every speed profile
 - **The scheduler tick was 100 Hz, so `pdMS_TO_TICKS(5)` rounded down to ZERO.**
   The "fast" and "balanced" profiles therefore had *no pacing at all* and
