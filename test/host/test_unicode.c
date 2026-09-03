@@ -68,4 +68,63 @@ TEST_MAIN_BEGIN
         CHECK(n > 0 && a[0].kind == DUCKY_HOLD, "UNICODE emits a held sequence");
         CHECK(ducky_parse_line(&st, "UNICODE U+00E9", a, 32) > 0, "accepts U+ prefix");
     }
+
+    SUITE("macOS: accents use Option dead keys, not the hex layout nobody has");
+    {
+        ducky_action_t a[8];
+        /* u-umlaut = Option+u, then u. Two keystrokes on a stock US Mac. */
+        int n = mac_option_seq(0x00FC, a, 8);
+        CHECK(n == 2, "u-umlaut is two keystrokes, got %d", n);
+        CHECK(a[0].key == (HID_KEY_A + ('u'-'a')) && (a[0].mods & HID_MOD_LALT),
+              "first is Option+u (the umlaut dead key)");
+        CHECK(a[1].key == (HID_KEY_A + ('u'-'a')) && a[1].mods == 0, "then a plain u");
+
+        n = mac_option_seq(0x00E9, a, 8);          /* e-acute */
+        CHECK(n == 2 && a[0].key == (HID_KEY_A + ('e'-'a')) && (a[0].mods & HID_MOD_LALT),
+              "e-acute starts with Option+e");
+        CHECK(a[1].key == (HID_KEY_A + ('e'-'a')) && a[1].mods == 0, "then a plain e");
+
+        n = mac_option_seq(0x00F1, a, 8);          /* n-tilde */
+        CHECK(n == 2 && (a[0].mods & HID_MOD_LALT) && a[0].key == (HID_KEY_A + ('n'-'a')),
+              "n-tilde starts with Option+n");
+
+        n = mac_option_seq(0x00DF, a, 8);          /* eszett */
+        CHECK(n == 1 && a[0].key == (HID_KEY_A + ('s'-'a')) && (a[0].mods & HID_MOD_LALT),
+              "eszett is a single Option+s");
+
+        n = mac_option_seq(0x20AC, a, 8);          /* euro */
+        CHECK(n == 1 && (a[0].mods & HID_MOD_LALT) && (a[0].mods & HID_MOD_LSHIFT),
+              "euro is Option+Shift+2");
+
+        n = mac_option_seq(0x00A3, a, 8);          /* pound */
+        CHECK(n == 1 && (a[0].mods & HID_MOD_LALT) && !(a[0].mods & HID_MOD_LSHIFT),
+              "pound is Option+3, with no shift");
+
+        CHECK(mac_option_seq(0x4E2D, a, 8) == 0,
+              "a CJK character has no Option sequence and says so");
+    }
+
+    SUITE("macOS: a STRING of accented text never falls back to the keypad");
+    {
+        /* The hex method types on the NUMERIC KEYPAD. Seeing a keypad usage in
+         * this output means we are back to the sequence that produced accent
+         * soup on a stock Mac. */
+        ducky_state_t st; ducky_state_init(&st);
+        st.layout = LAYOUT_US; st.target_os = OS_MAC;
+        static ducky_action_t a[192];
+        int n = ducky_parse_line(&st, "STRING Gr\xc3\xbc" "\xc3\x9f" "e aus M\xc3\xbc" "nchen", a, 192);
+        CHECK(n > 0, "the line produced keystrokes");
+        /* The Windows hex method always opens with the keypad "+", so that key
+         * is the giveaway - the hex digits themselves may be letters. */
+        bool keypad = false;
+        for (int i = 0; i < n; i++) if (a[i].key == HID_KEY_KP_PLUS) keypad = true;
+        CHECK(!keypad, "the keypad hex sequence is not used at all");
+
+        /* and the same text on Windows SHOULD still use the keypad method */
+        st.target_os = OS_WINDOWS;
+        n = ducky_parse_line(&st, "STRING M\xc3\xbc" "nchen", a, 192);
+        keypad = false;
+        for (int i = 0; i < n; i++) if (a[i].key == HID_KEY_KP_PLUS) keypad = true;
+        CHECK(keypad, "Windows still uses Alt + keypad, which is right for it");
+    }
 TEST_MAIN_END

@@ -178,7 +178,12 @@ static int emit_string(const char *s, kb_layout_t layout, target_os_t os,
                 memset(&out[n], 0, sizeof(out[n]));
                 out[n].kind = DUCKY_KEY; out[n].key = bk; out[n].mods = bm; n++;
             } else {                           /* otherwise: OS Unicode method */
-                int adds = unicode_seq(cp, os, out + n, max - n);
+                /* On macOS the Option sequences come first: they work on the
+                 * keyboard the machine already has, where the hex method does
+                 * not. */
+                int adds = 0;
+                if (os == OS_MAC) adds = mac_option_seq(cp, out + n, max - n);
+                if (adds == 0)    adds = unicode_seq(cp, os, out + n, max - n);
                 if (adds == 0) { p = start; break; }
                 n += adds;
             }
@@ -410,6 +415,10 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
             memset(&out[0], 0, sizeof(out[0]));
             out[0].kind = DUCKY_KEY; out[0].key = uk; out[0].mods = um;
             return 1;
+        }
+        if (st->target_os == OS_MAC) {
+            int adds = mac_option_seq(cp, out, max);
+            if (adds) return adds;
         }
         return unicode_seq(cp, st->target_os, out, max);
     }

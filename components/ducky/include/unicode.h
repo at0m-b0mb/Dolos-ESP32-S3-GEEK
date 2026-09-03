@@ -25,5 +25,10 @@ int utf8_next(const char **p, uint32_t *cp);
 
 /* Emit the key sequence that types codepoint cp on target os, into out (up to
  * max actions). Returns the count (0 if it does not fit / unsupported). */
+/* macOS Option sequences for accented characters on the STOCK US keyboard.
+ * Returns 0 if this codepoint has no such sequence. Prefer it over
+ * unicode_seq() on macOS: the hex method needs a layout nobody has selected. */
+int mac_option_seq(uint32_t cp, ducky_action_t *out, int max);
+
 int unicode_seq(uint32_t cp, target_os_t os, ducky_action_t *out, int max);
 #endif
