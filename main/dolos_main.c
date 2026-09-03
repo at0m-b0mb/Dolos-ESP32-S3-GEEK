@@ -74,13 +74,19 @@ static dolos_config_t s_cfg;
 
 static char  s_names[MAX_PAYLOADS][64];
 static int   s_npayloads, s_sel;
-/* 6 KB was not a limit anyone had chosen; it was just the size of the buffer,
- * and a bigger file was read up to it and NUL-terminated mid-line without a
- * word. The script silently stopped halfway. 32 KB is comfortably inside the
- * interpreter's own 64 KB ceiling and lives in PSRAM, and anything larger is
- * now REFUSED with a reason instead of quietly half-run. */
+/* 6 KB was not a limit anyone had chosen; it was just the size of an array, and
+ * a bigger file was read up to it and NUL-terminated mid-line without a word.
+ *
+ * The replacement must come off the PSRAM HEAP, exactly as dscript_alloc()
+ * does. EXT_RAM_BSS_ATTR was tried and is a trap: it compiles to nothing unless
+ * CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is enabled, which this project
+ * deliberately leaves off - so the array landed in internal DRAM and took
+ * 26 KB from the one pool Wi-Fi, TinyUSB and the SD card all need. The device
+ * boot-looped and refused to fire. Internal RAM is the scarce resource here;
+ * nothing large may sit in it by accident. */
 #define PAYLOAD_MAX 32768
-static EXT_RAM_BSS_ATTR char s_payload_buf[PAYLOAD_MAX];
+static char  *s_payload_buf;      /* PSRAM heap, allocated once at boot */
+static size_t s_payload_cap;
 static const char *s_payload;
 static const char *s_payload_name = "demo";
 static int   s_total_lines, s_cur_line, s_last_lines;
@@ -219,24 +225,24 @@ static void load_selected(void)
     if (s_npayloads > 0) {
         char path[96];
         snprintf(path, sizeof(path), "/sdcard/%s", s_names[s_sel]);
-        FILE *fp = fopen(path, "r");
+        FILE *fp = s_payload_buf ? fopen(path, "r") : NULL;
         if (fp) {
-            int n = (int)fread(s_payload_buf, 1, sizeof(s_payload_buf) - 1, fp);
+            int n = (int)fread(s_payload_buf, 1, s_payload_cap - 1, fp);
             /* Is there MORE of the file than we just read? Half a payload that
              * looks like a whole one is the worst outcome: it types a script
              * that ends mid-line and reports success. */
             int extra = fgetc(fp);
             fclose(fp);
             if (extra != EOF) {
-                ESP_LOGE(TAG, "payload '%s' is larger than %d bytes - refusing to run half of it",
-                         s_names[s_sel], PAYLOAD_MAX);
+                ESP_LOGE(TAG, "payload '%s' is larger than %u bytes - refusing to run half of it",
+                         s_names[s_sel], (unsigned)s_payload_cap);
                 s_payload = "REM payload too large for this device\n";
                 s_payload_name = s_names[s_sel];
                 s_total_lines = 1;
                 memset(&s_lint_first, 0, sizeof(s_lint_first));
                 s_lint_first.line = 1;
                 snprintf(s_lint_first.msg, sizeof(s_lint_first.msg),
-                         "payload is bigger than %d KB", PAYLOAD_MAX / 1024);
+                         "payload is bigger than %u KB", (unsigned)(s_payload_cap / 1024));
                 s_lint_problems = 1;      /* blocks arming, and says why */
                 return;
             }
@@ -1226,6 +1232,17 @@ void app_main(void)
     /* Work out which partition could be shared, but do not share it: nothing is
      * exposed until a payload asks with ATTACKMODE STORAGE. */
     if (s_sd_ok) usb_msc_init(s_card, s_cfg.msc_partition);
+    /* The payload text: PSRAM by preference, a small internal buffer only if
+     * there is no PSRAM at all. Never a large static in internal DRAM. */
+    s_payload_buf = heap_caps_malloc(PAYLOAD_MAX, MALLOC_CAP_SPIRAM);
+    s_payload_cap = s_payload_buf ? PAYLOAD_MAX : 0;
+    if (!s_payload_buf) {
+        s_payload_buf = heap_caps_malloc(6144, MALLOC_CAP_INTERNAL);
+        s_payload_cap = s_payload_buf ? 6144 : 0;
+        ESP_LOGW(TAG, "no PSRAM for the payload buffer - falling back to %u bytes",
+                 (unsigned)s_payload_cap);
+    }
+    ESP_LOGW(TAG, "payload buffer: %u bytes at %p", (unsigned)s_payload_cap, s_payload_buf);
     load_selected();
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
 
