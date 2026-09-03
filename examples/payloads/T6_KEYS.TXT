@@ -1,0 +1,57 @@
+REM ============================================================
+REM  T6 - modifiers, held keys and editing keys
+REM
+REM  Uses ONLY keys that are harmless in a text editor: no GUI,
+REM  no launcher, nothing that runs a command. Open a plain text
+REM  editor, click into it, then fire.
+REM ============================================================
+DEFAULTDELAY 40
+DELAY 1500
+
+STRING === T6 KEYS ===
+ENTER
+
+REM --- shift as a modifier on a letter ---
+SHIFT a
+SHIFT b
+SHIFT c
+STRING  <- expect ABC before this arrow
+ENTER
+
+REM --- HOLD / RELEASE around several keys ---
+HOLD SHIFT
+STRING held
+RELEASE SHIFT
+STRING  <- expect HELD in capitals
+ENTER
+
+REM --- editing keys: build a word, then repair it ---
+STRING teh
+LEFT
+LEFT
+DELETE
+STRING h
+END
+STRING e
+STRING  <- expect the word "the"
+ENTER
+
+REM --- HOME and END place the cursor correctly ---
+STRING MIDDLE
+HOME
+STRING [start]
+END
+STRING [end]
+ENTER
+
+REM --- backspace removes exactly what it should ---
+STRING keepXXXX
+BACKSPACE
+BACKSPACE
+BACKSPACE
+BACKSPACE
+STRING  <- expect the word "keep"
+ENTER
+
+STRING === T6 END ===
+ENTER

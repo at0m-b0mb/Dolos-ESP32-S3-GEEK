@@ -1,0 +1,75 @@
+REM ============================================================
+REM  TA - limits and stress
+REM
+REM  Pushes the parser and the interpreter near their documented
+REM  bounds: deep nesting, many variables, a long single line and
+REM  a large loop count. Everything here must still be exact.
+REM  Text only. This one takes a while.
+REM ============================================================
+DEFAULTDELAY 5
+DELAY 1500
+
+STRING === TA STRESS ===
+ENTER
+
+REM --- 100 loop iterations, summed. Expect 5050. ---
+VAR $i = 1
+VAR $sum = 0
+WHILE ($i <= 100)
+$sum = $sum + $i
+$i = $i + 1
+END_WHILE
+STRING sum 1..100  expect 5050  got $sum
+ENTER
+
+REM --- deep nesting: four levels, innermost runs 2*2*2*2 = 16 times ---
+VAR $count = 0
+VAR $a = 1
+WHILE ($a <= 2)
+VAR $b = 1
+WHILE ($b <= 2)
+VAR $c = 1
+WHILE ($c <= 2)
+VAR $d = 1
+WHILE ($d <= 2)
+$count = $count + 1
+$d = $d + 1
+END_WHILE
+$c = $c + 1
+END_WHILE
+$b = $b + 1
+END_WHILE
+$a = $a + 1
+END_WHILE
+STRING nested x4   expect 16    got $count
+ENTER
+
+REM --- many distinct variables held at once ---
+VAR $v1 = 1
+VAR $v2 = 2
+VAR $v3 = 3
+VAR $v4 = 4
+VAR $v5 = 5
+VAR $v6 = 6
+VAR $v7 = 7
+VAR $v8 = 8
+VAR $v9 = 9
+VAR $v10 = 10
+VAR $vsum = $v1 + $v2 + $v3 + $v4 + $v5 + $v6 + $v7 + $v8 + $v9 + $v10
+STRING ten vars    expect 55    got $vsum
+ENTER
+
+REM --- one very long line: 300 characters, count the tail marker ---
+STRING 300CHARS_000000000100000000020000000003000000000400000000050000000006000000000700000000080000000009000000000A000000000B000000000C000000000D000000000E000000000F0000000010000000001100000000120000000013000000001400000000150000000016000000001700000000180000000019_END
+ENTER
+
+REM --- 30 short lines in a tight loop ---
+VAR $k = 1
+WHILE ($k <= 30)
+STRING line $k
+ENTER
+$k = $k + 1
+END_WHILE
+
+STRING === TA END ===
+ENTER

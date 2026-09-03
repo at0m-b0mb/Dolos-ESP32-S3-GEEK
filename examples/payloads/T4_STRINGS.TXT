@@ -1,0 +1,52 @@
+REM ============================================================
+REM  T4 - multi-line STRING blocks and DEFINE macros
+REM
+REM  STRING/END_STRING types its lines with no line breaks;
+REM  STRINGLN/END_STRINGLN puts each on its own line. Text only.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === T4 STRINGS AND DEFINES ===
+ENTER
+
+REM --- DEFINE is a TEXT macro, not a number ---
+DEFINE #SITE https://example.invalid/probe
+DEFINE #TAG  dolos-test
+
+STRING define url  -> #SITE
+ENTER
+STRING define tag  -> #TAG
+ENTER
+ENTER
+
+REM --- STRINGLN block: each line separate, four lines total ---
+STRING block STRINGLN follows, expect 4 separate lines
+ENTER
+STRINGLN
+alpha one
+bravo two
+charlie three
+delta four
+END_STRINGLN
+ENTER
+
+REM --- STRING block: joined, so this becomes ONE long line ---
+STRING block STRING follows, expect all on ONE line
+ENTER
+STRING
+joined-A
+joined-B
+joined-C
+END_STRING
+ENTER
+ENTER
+
+REM --- a line containing characters the parser must not eat ---
+STRING quotes "double" and 'single' and $literal
+ENTER
+STRING symbols <>{}[]()|\/~`^%#@!
+ENTER
+
+STRING === T4 END ===
+ENTER

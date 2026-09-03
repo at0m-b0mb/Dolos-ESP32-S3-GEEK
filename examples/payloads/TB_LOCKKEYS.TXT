@@ -1,0 +1,39 @@
+REM ============================================================
+REM  TB - lock-key handshake (INTERACTIVE)
+REM
+REM  This one needs you: it waits for you to press CAPS LOCK.
+REM  It proves the device can READ state back from the host,
+REM  which is the return channel used for OS detection.
+REM
+REM  If it seems to hang, the host is not reporting lock state
+REM  and you should abort with a tap. Text only.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === TB LOCK KEYS ===
+ENTER
+STRING caps lock is currently: $_CAPSLOCK_ON  (1 = on, 0 = off)
+ENTER
+STRING num lock is currently:  $_NUMLOCK_ON
+ENTER
+ENTER
+
+STRING Now press CAPS LOCK once. Waiting...
+ENTER
+WAIT_FOR_CAPS_CHANGE
+STRING caps lock changed, now: $_CAPSLOCK_ON
+ENTER
+ENTER
+
+STRING Press CAPS LOCK again to finish. Waiting...
+ENTER
+WAIT_FOR_CAPS_CHANGE
+STRING caps lock changed again, now: $_CAPSLOCK_ON
+ENTER
+ENTER
+
+STRING the device read host state twice - return channel works
+ENTER
+STRING === TB END ===
+ENTER

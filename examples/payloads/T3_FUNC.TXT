@@ -1,0 +1,56 @@
+REM ============================================================
+REM  T3 - functions, arguments by variable, and return values
+REM
+REM  Functions must not run where they are defined, only where
+REM  they are called. Text only.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === T3 FUNCTIONS ===
+ENTER
+
+VAR $calls = 0
+
+FUNCTION rule()
+STRING ------------------------------
+ENTER
+$calls = $calls + 1
+END_FUNCTION
+
+REM  If definitions ran inline, a rule would appear right here.
+STRING no rule should appear above this line
+ENTER
+
+rule
+STRING called once
+ENTER
+rule
+STRING called twice
+ENTER
+STRING call count expect 2  got $calls
+ENTER
+
+REM --- a function that returns a value ---
+VAR $in = 6
+FUNCTION doubler()
+VAR $out = $in * 2
+RETURN $out
+END_FUNCTION
+
+VAR $result = doubler()
+STRING return expect 12  got $result
+ENTER
+
+REM --- calling in a loop: the counter proves each call happened ---
+$calls = 0
+VAR $k = 1
+WHILE ($k <= 3)
+rule
+$k = $k + 1
+END_WHILE
+STRING loop calls expect 3  got $calls
+ENTER
+
+STRING === T3 END ===
+ENTER

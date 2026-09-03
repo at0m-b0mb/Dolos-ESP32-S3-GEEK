@@ -1,0 +1,73 @@
+REM ============================================================
+REM  T2 - conditionals and loops
+REM
+REM  Each block states the line it must print. A missing or extra
+REM  line means the branch or loop is wrong. Text only.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === T2 CONTROL FLOW ===
+ENTER
+
+VAR $n = 7
+
+IF ($n > 5) THEN
+STRING if    taken   (correct)
+ELSE
+STRING if    NOT taken   (WRONG)
+END_IF
+ENTER
+
+IF ($n > 100) THEN
+STRING else  NOT taken   (WRONG)
+ELSE
+STRING else  taken   (correct)
+END_IF
+ENTER
+
+REM --- ELSE IF chain: exactly one line should appear ---
+VAR $grade = 85
+IF ($grade >= 90) THEN
+STRING chain wrong branch A
+ELSE IF ($grade >= 80) THEN
+STRING chain correct branch B
+ELSE
+STRING chain wrong branch C
+END_IF
+ENTER
+
+REM --- a counted loop: exactly five numbered lines ---
+VAR $i = 1
+WHILE ($i <= 5)
+STRING loop iteration $i of 5
+ENTER
+$i = $i + 1
+END_WHILE
+
+REM --- a loop that must never run: nothing between the markers ---
+STRING zero-iteration loop starts
+ENTER
+VAR $z = 10
+WHILE ($z < 5)
+STRING THIS LINE MUST NOT APPEAR
+ENTER
+$z = $z + 1
+END_WHILE
+STRING zero-iteration loop ends
+ENTER
+
+REM --- nesting: three rows of two = six pairs ---
+VAR $r = 1
+WHILE ($r <= 3)
+VAR $c = 1
+WHILE ($c <= 2)
+STRING nested r$r c$c
+ENTER
+$c = $c + 1
+END_WHILE
+$r = $r + 1
+END_WHILE
+
+STRING === T2 END ===
+ENTER

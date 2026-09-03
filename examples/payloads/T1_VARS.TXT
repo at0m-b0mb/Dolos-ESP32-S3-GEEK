@@ -1,0 +1,59 @@
+REM ============================================================
+REM  T1 - variables, arithmetic and substitution
+REM
+REM  Every line prints what it SHOULD say next to what it does
+REM  say. If the two halves of a line disagree, that operator is
+REM  broken. Text only; nothing executes.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === T1 VARIABLES ===
+ENTER
+
+VAR $a = 12
+VAR $b = 5
+
+STRING a=12 b=5   ->  a is $a, b is $b
+ENTER
+
+VAR $sum = $a + $b
+VAR $dif = $a - $b
+VAR $mul = $a * $b
+VAR $div = $a / $b
+VAR $mod = $a % $b
+STRING add  expect 17  got $sum
+ENTER
+STRING sub  expect 7   got $dif
+ENTER
+STRING mul  expect 60  got $mul
+ENTER
+STRING div  expect 2   got $div
+ENTER
+STRING mod  expect 2   got $mod
+ENTER
+
+REM --- precedence: multiplication before addition, brackets win ---
+VAR $p1 = 2 + 3 * 4
+VAR $p2 = (2 + 3) * 4
+STRING prec expect 14  got $p1
+ENTER
+STRING brkt expect 20  got $p2
+ENTER
+
+REM --- reassignment and self-reference ---
+VAR $c = 1
+$c = $c + 41
+STRING self expect 42  got $c
+ENTER
+
+REM --- comparison operators yield 1 or 0 ---
+VAR $t = ($a > $b)
+VAR $f = ($a < $b)
+STRING gt   expect 1   got $t
+ENTER
+STRING lt   expect 0   got $f
+ENTER
+
+STRING === T1 END ===
+ENTER

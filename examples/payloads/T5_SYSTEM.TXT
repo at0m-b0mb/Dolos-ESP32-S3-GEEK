@@ -1,0 +1,54 @@
+REM ============================================================
+REM  T5 - system variables and random generators
+REM
+REM  Values here depend on the host and on chance, so this test
+REM  is about the mechanism working at all: numbers must appear
+REM  where numbers are expected, and randoms must differ.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === T5 SYSTEM VARIABLES ===
+ENTER
+
+STRING target OS code (0=win 1=linux 2=mac) -> $_OS
+ENTER
+STRING caps lock on?    -> $_CAPSLOCK_ON
+ENTER
+STRING num lock on?     -> $_NUMLOCK_ON
+ENTER
+STRING scroll lock on?  -> $_SCROLLLOCK_ON
+ENTER
+ENTER
+
+REM --- random integers in a bounded range ---
+VAR $_RANDOM_MIN = 10
+VAR $_RANDOM_MAX = 99
+VAR $r1 = $_RANDOM_INT
+VAR $r2 = $_RANDOM_INT
+VAR $r3 = $_RANDOM_INT
+STRING three randoms 10..99 -> $r1 $r2 $r3
+ENTER
+STRING (they should not all be identical)
+ENTER
+ENTER
+
+REM --- the RANDOM_ keystroke generators type one character each ---
+STRING random lower:  
+RANDOM_LOWERCASE_LETTER
+RANDOM_LOWERCASE_LETTER
+RANDOM_LOWERCASE_LETTER
+ENTER
+STRING random upper:  
+RANDOM_UPPERCASE_LETTER
+RANDOM_UPPERCASE_LETTER
+RANDOM_UPPERCASE_LETTER
+ENTER
+STRING random digits: 
+RANDOM_NUMBER
+RANDOM_NUMBER
+RANDOM_NUMBER
+ENTER
+
+STRING === T5 END ===
+ENTER

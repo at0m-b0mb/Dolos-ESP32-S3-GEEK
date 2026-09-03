@@ -1,0 +1,56 @@
+REM ============================================================
+REM  T7 - timing and repetition
+REM
+REM  Time this one with a stopwatch. The banner states how long
+REM  each section should take; being wildly out means DELAY or
+REM  the speed profile is misbehaving. Text only.
+REM ============================================================
+DEFAULTDELAY 0
+DELAY 1500
+
+STRING === T7 TIMING ===
+ENTER
+STRING this test should take roughly 11 seconds in total
+ENTER
+ENTER
+
+STRING section A: five 1-second delays, expect ~5s
+ENTER
+STRING .
+DELAY 1000
+STRING .
+DELAY 1000
+STRING .
+DELAY 1000
+STRING .
+DELAY 1000
+STRING .
+DELAY 1000
+STRING  done
+ENTER
+ENTER
+
+REM --- REPEAT must reproduce the previous line exactly N more times ---
+STRING section B: the next line must appear exactly 10 times
+ENTER
+STRINGLN repeat-me
+REPEAT 9
+ENTER
+
+REM --- DEFAULTDELAY applies between commands, so this crawls ---
+STRING section C: 20 dots with a 100ms default delay, expect ~2s
+ENTER
+DEFAULTDELAY 100
+STRING ....................
+DEFAULTDELAY 0
+ENTER
+ENTER
+
+REM --- a burst with no delay at all: the accuracy stress case ---
+STRING section D: 200 characters at full speed, count them
+ENTER
+STRING 00000000011111111112222222222333333333344444444445555555555666666666677777777778888888888999999999900000000001111111111222222222233333333334444444444555555555566666666667777777777888888888899999999995
+ENTER
+
+STRING === T7 END ===
+ENTER

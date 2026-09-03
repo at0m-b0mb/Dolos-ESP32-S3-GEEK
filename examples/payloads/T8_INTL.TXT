@@ -1,0 +1,49 @@
+REM ============================================================
+REM  T8 - international characters
+REM
+REM  Set the LAYOUT in Settings to match the machine you are
+REM  typing into, then fire. Characters that are keys on that
+REM  layout are typed directly; accented letters may use a dead
+REM  key; anything else falls back to the OS Unicode method,
+REM  which needs TARGET OS set correctly too.
+REM ============================================================
+DEFAULTDELAY 30
+DELAY 1500
+
+STRING === T8 INTERNATIONAL ===
+ENTER
+STRING layout and target OS must match the host for this to pass
+ENTER
+ENTER
+
+STRING ascii baseline  the quick brown fox 0123456789
+ENTER
+
+STRING german          Gruesse aus Muenchen: ae oe ue ss
+ENTER
+STRING german native   Grüße aus München
+ENTER
+
+STRING french          Voila, tres bien, ca va
+ENTER
+STRING french native   Voilà, très bien, ça va
+ENTER
+
+STRING spanish         Manana, senor, ninos
+ENTER
+STRING spanish native  Mañana, señor, niños
+ENTER
+
+STRING nordic          aa ae oe
+ENTER
+STRING nordic native   Åse æble Øre
+ENTER
+
+STRING symbols         euro pound yen: 
+UNICODE 20AC
+UNICODE 00A3
+UNICODE 00A5
+ENTER
+
+STRING === T8 END ===
+ENTER

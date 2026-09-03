@@ -1,0 +1,58 @@
+REM ============================================================
+REM  T9 - comments and payload control
+REM
+REM  NOTE ON RESTART_PAYLOAD: it is deliberately NOT exercised
+REM  here. Restarting re-runs the file from the first line, so
+REM  any "VAR $guard = 0" is re-initialised on every pass and the
+REM  payload can never escape. A restart loop is unbounded by
+REM  nature; the device stops it with its runaway guard, but that
+REM  is a safety net, not a passing test. STOP_PAYLOAD, which
+REM  ends a run deterministically, is tested instead.
+REM
+REM  Text only.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === T9 CONTROL ===
+ENTER
+
+REM this single-line comment must not be typed
+# this hash comment must not be typed either
+
+REM_BLOCK
+everything inside this block is a comment
+including this line, and this one
+none of it may appear in the output
+END_REM
+
+STRING no comment text appears above this line
+ENTER
+ENTER
+
+REM --- comments must not break the lines around them ---
+STRING before comment
+REM ...comment between two typed lines...
+ENTER
+STRING after comment
+ENTER
+ENTER
+
+REM --- a comment containing things that LOOK like commands ---
+REM STRING this must not be typed
+REM ENTER
+REM WHILE ($x < 10)
+STRING commands inside comments stayed inert
+ENTER
+ENTER
+
+REM --- STOP_PAYLOAD ends the run immediately ---
+STRING the next line is the last thing you should see
+ENTER
+STRING === T9 END (stopping now) ===
+ENTER
+STOP_PAYLOAD
+STRING THIS LINE MUST NEVER APPEAR
+ENTER
+STRING NOR THIS ONE
+ENTER

@@ -1,0 +1,74 @@
+REM ============================================================
+REM  TD - awkward input the parser must survive
+REM
+REM  Odd spacing, empty constructs, boundary numbers and strings
+REM  full of characters that look like syntax. None of it should
+REM  crash, hang, or produce the wrong text. Text only.
+REM ============================================================
+DEFAULTDELAY 20
+DELAY 1500
+
+STRING === TD EDGE CASES ===
+ENTER
+
+REM --- irregular whitespace around an assignment ---
+VAR    $spaced     =     40
+STRING spaced var  expect 40  got $spaced
+ENTER
+
+REM --- negative numbers and zero ---
+VAR $neg = 0 - 17
+VAR $zero = 0
+STRING negative    expect -17 got $neg
+ENTER
+STRING zero        expect 0   got $zero
+ENTER
+
+REM --- division and modulo by one, and a large product ---
+VAR $d1 = 99 / 1
+VAR $m1 = 99 % 1
+VAR $big = 1000 * 1000
+STRING div by one  expect 99  got $d1
+ENTER
+STRING mod by one  expect 0   got $m1
+ENTER
+STRING big product expect 1000000 got $big
+ENTER
+
+REM --- a variable name that contains digits and underscores ---
+VAR $x_9_y = 123
+STRING odd name    expect 123 got $x_9_y
+ENTER
+
+REM --- text that LOOKS like syntax but is inside a STRING ---
+STRING literal: IF ($x > 1) THEN END_IF WHILE END_WHILE
+ENTER
+STRING literal: VAR $notavar = 5 and #NOTADEFINE
+ENTER
+STRING literal: a lone dollar $ and a lone hash #
+ENTER
+
+REM --- an empty-ish line and a line that is only spaces ---
+STRING before the blanks
+ENTER
+   
+STRING after the blanks
+ENTER
+
+REM --- a condition that is exactly on the boundary ---
+VAR $b = 10
+IF ($b >= 10) THEN
+STRING boundary >= correct
+ELSE
+STRING boundary >= WRONG
+END_IF
+ENTER
+IF ($b > 10) THEN
+STRING boundary >  WRONG
+ELSE
+STRING boundary >  correct
+END_IF
+ENTER
+
+STRING === TD END ===
+ENTER

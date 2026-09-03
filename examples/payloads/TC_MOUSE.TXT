@@ -1,0 +1,51 @@
+REM ============================================================
+REM  TC - mouse and media keys
+REM
+REM  These move your pointer and touch volume. Nothing is
+REM  clicked and nothing is destroyed, but it IS visible - do
+REM  not run it while something important has focus.
+REM
+REM  Watch the pointer: it should trace a square and return to
+REM  where it started.
+REM ============================================================
+DEFAULTDELAY 30
+DELAY 2000
+
+STRING === TC MOUSE AND MEDIA ===
+ENTER
+STRING watch the pointer trace a square in 3 seconds
+ENTER
+DELAY 3000
+
+REM --- a square: right, down, left, up. It should end where it began. ---
+MOUSEMOVE 100 0
+DELAY 300
+MOUSEMOVE 0 100
+DELAY 300
+MOUSEMOVE -100 0
+DELAY 300
+MOUSEMOVE 0 -100
+DELAY 500
+
+REM --- scroll wheel, up then back down by the same amount ---
+MOUSEWHEEL 3
+DELAY 300
+MOUSEWHEEL -3
+DELAY 500
+
+REM --- volume down then up: it should end where it started ---
+MEDIA VOLDOWN
+DELAY 200
+MEDIA VOLDOWN
+DELAY 200
+MEDIA VOLUP
+DELAY 200
+MEDIA VOLUP
+DELAY 500
+
+STRING pointer should be back where it started
+ENTER
+STRING volume should be unchanged
+ENTER
+STRING === TC END ===
+ENTER
