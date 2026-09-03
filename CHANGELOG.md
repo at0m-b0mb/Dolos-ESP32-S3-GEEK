@@ -2,6 +2,69 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.8.0] - 2026-09-02
+A line-by-line audit of the whole codebase, and a boot crash tracked down with
+the core dump rather than guessed at. Nothing here is a feature; all of it is
+the difference between a device that mostly works and one you can hand to
+someone else.
+
+### The test suite had never run in CI
+
+`make -C test/host` is what both workflows invoke, and it ran the portability
+check and stopped. The default goal is the first normal target in the file, and
+`.PHONY` is not one - so every green badge since the harness was added proved
+only that the sources compile as ISO C. Setting `.DEFAULT_GOAL` surfaced a real
+regression the suite had been holding all along. This is the most consequential
+fix in the release: the safety net was disconnected.
+
+### Silent failures, which are worse than crashes
+
+- **A STRING longer than 192 characters typed 192 characters and dropped the
+  rest** without a word - and long one-liners are exactly what real payloads
+  type. Any length now types in full, continued across passes.
+- **`HOLD SPACE` pressed nothing.** Only the modifier byte was ever sent, so
+  holding a normal key parsed perfectly and did nothing.
+- **`CTRL +` sent the wrong key**, dropping the shift that produces `+`.
+- **`F13`-`F24` invalidated the whole line** despite being real HID usages.
+- **The uplink, boot-log and storage settings were parsed but never written**,
+  so they vanished at the next power cycle. The upstream Wi-Fi password was
+  persisted nowhere at all; it now lives in NVS beside the others.
+- **An over-long config line could invent a second setting**, because the parser
+  resumed in the middle of it.
+- **A rejected payload said "PAYLOAD PRODUCED NO KEYSTROKES"** while the parser
+  knew the exact line and reason.
+
+### Safety and correctness
+
+- **The stop button was ignored during `DELAY`.** A payload containing
+  `DELAY 20000` kept typing rights over the operator for twenty seconds after
+  they pressed stop. Delays now sleep in slices and return immediately.
+- **A race on the lint verdict that gates arming.** The UI task reloaded and
+  re-linted payloads without the app lock while the console task did so under
+  it, and `ducky_lint()` keeps an 8 KB buffer and a parser as statics.
+- **Sleeping inside a Wi-Fi event handler** blocked the shared system event task
+  for three seconds at a time on every failed join.
+- **A NULL label panicked the device from the display path.**
+- **Login timing revealed which usernames exist** - an unknown name returned at
+  once, a known one paid for 20,000 PBKDF2 rounds.
+- `HID_KEY_MENU` was `0x65` here and `0x76` in TinyUSB: one name, two values,
+  resolved by include order.
+
+### The boot crash
+
+Four crashes in a row on boot with the radio on; a clean boot in safe boot, the
+one mode that does not start the radio. The core dump named the `esp_timer` task
+with `exccause 0x47` (CacheError) and a wild PC - a cache-disabled access, not
+an allocation failure. Two PSRAM settings sat at their IDF defaults and were
+never pinned: task stacks were allowed in PSRAM (unusable whenever an NVS commit
+turns the cache off), and only 32 KB of internal RAM was reserved for the radio,
+TinyUSB and the SD card to share. Both are now pinned, and the free internal
+heap is logged either side of Wi-Fi bring-up.
+
+### Tests
+
+13 suites, all of them now actually executed, covering every fix above.
+
 ## [0.7.0] - 2026-08-29
 Hardware brought the truth. This release is what a day of running the firmware
 on a real board, against a real host, actually found - plus DuckyScript 3, a
