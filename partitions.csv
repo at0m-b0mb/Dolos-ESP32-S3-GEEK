@@ -2,3 +2,10 @@
 nvs,        data, nvs,      0x9000,   0x6000
 phy_init,   data, phy,      0xf000,   0x1000
 factory,    app,  factory,  0x10000,  0x300000
+# A panic on this device is invisible: TinyUSB owns the USB pins, so the panic
+# handler prints to a port that no longer exists, and an SD log races with the
+# very crash it is meant to record. The core dump is written by the panic
+# handler itself, straight to flash, and is read back later in FLASH MODE with
+# `idf.py coredump-info`. It is not scaffolding - it is the only crash evidence
+# this hardware can produce.
+coredump,   data, coredump, ,        64K

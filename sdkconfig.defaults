@@ -32,12 +32,28 @@ CONFIG_FATFS_MAX_LFN=64
 # keystrokes back-to-back with no pacing at all, and drop characters.
 CONFIG_FREERTOS_HZ=1000
 
-# The DuckyScript parse buffers (8 KB lines, to fit the base64 one-liners real
-# payloads contain) live in PSRAM. Internal RAM is what Wi-Fi, TinyUSB and the
-# HTTP server compete for, and starving it is what crashed this device before.
-CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# NOTE: the parse buffers live in PSRAM, but they are allocated from the PSRAM
+# HEAP at run time - not by moving .bss there. Moving .bss relocates every
+# static in the image, Wi-Fi's own included, and Wi-Fi needs some of its
+# structures in internal DMA-capable RAM.
+# CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY is not set
+# A task stack in PSRAM is unusable whenever the cache is off - which is exactly
+# what an NVS commit does - and the failure is a CacheError with a wild PC, not
+# an allocation error. Keep every stack in internal RAM.
+# CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY is not set
+# Wi-Fi, TinyUSB and the SD card all need DMA-capable INTERNAL memory, and with
+# PSRAM present the allocator hands out external RAM until this reserve is all
+# that is left. 32 KB was not enough headroom for the radio to come up beside
+# the other three; the device crashed on boot with the radio on and survived in
+# safe boot, where the radio is the one thing that does not start.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 
 # Mass storage, so ATTACKMODE HID STORAGE can expose one microSD partition to
 # the host. The MSC interface is always present in the descriptor; whether a
 # medium exists is decided at run time (see main/usb_msc.c).
 CONFIG_TINYUSB_MSC_ENABLED=y
+
+# Timer callbacks here reach heap/PSRAM code, and 3584 was not enough:
+# the core dump caught esp_timer smashing its own stack inside
+# esp_psram_check_ptr_addr with a poisoned return frame.
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=6144
