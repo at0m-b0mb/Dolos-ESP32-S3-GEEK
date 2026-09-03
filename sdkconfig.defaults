@@ -57,3 +57,17 @@ CONFIG_TINYUSB_MSC_ENABLED=y
 # the core dump caught esp_timer smashing its own stack inside
 # esp_psram_check_ptr_addr with a poisoned return frame.
 CONFIG_ESP_TIMER_TASK_STACK_SIZE=6144
+
+# --- crash evidence -------------------------------------------------------
+# These MUST live here and not only in the generated sdkconfig.
+#
+# sdkconfig is regenerated whenever the defaults change, and anything set only
+# there is silently lost. That is exactly what happened: core dumps were turned
+# off by a regeneration, the partition kept an old dump, and a run of real
+# panics left no evidence at all - every one of them reported "core dump
+# written" while writing nothing. A crash you cannot read is a crash you cannot
+# fix.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_SHA256=y
+CONFIG_ESP_COREDUMP_STACK_SIZE=1280
