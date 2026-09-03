@@ -20,6 +20,7 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
@@ -1309,6 +1310,18 @@ static void ensure_credentials(void)
  * checking integrity after each stage names the stage responsible. Results are
  * buffered until the card is mounted, because the earliest stages run before
  * there is anywhere to write them. */
+/* The stage a crash happened in, carried ACROSS the reset.
+ *
+ * Writing the result to the card cannot work when the thing being reported is
+ * the reason fopen() is about to fail - the last checkpoint died inside fopen,
+ * so the very line naming the culprit was the one that never got written. RTC
+ * memory survives a panic reset, so the marker is stamped BEFORE anything
+ * risky, and the next boot reports what the previous one was doing. */
+RTC_NOINIT_ATTR static uint32_t s_rtc_magic;
+RTC_NOINIT_ATTR static char     s_rtc_stage[24];
+RTC_NOINIT_ATTR static uint32_t s_rtc_stack_left;
+#define RTC_STAGE_MAGIC 0xD0105A1Eu
+
 static char   s_heaplog[640];
 static size_t s_heaplog_n;
 static bool   s_booting = true;   /* load_selected() runs later too; only log boot */
@@ -1316,10 +1329,15 @@ static bool   s_booting = true;   /* load_selected() runs later too; only log bo
 static void heap_checkpoint(const char *stage)
 {
     if (!s_booting) return;
+    /* Stamped first, so it survives even if this function is what dies. */
+    snprintf(s_rtc_stage, sizeof(s_rtc_stage), "%s", stage);
+    s_rtc_stack_left = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+    s_rtc_magic = RTC_STAGE_MAGIC;
     bool ok = heap_caps_check_integrity_all(false);
     if (s_heaplog_n < sizeof(s_heaplog) - 1) {
         int w = snprintf(s_heaplog + s_heaplog_n, sizeof(s_heaplog) - s_heaplog_n,
-                         "  %-20s %s\n", stage, ok ? "ok" : "*** CORRUPT ***");
+                         "  %-14s %-15s stack_left=%u\n", stage,
+                         ok ? "ok" : "*** CORRUPT ***", (unsigned)s_rtc_stack_left);
         if (w > 0 && (size_t)w < sizeof(s_heaplog) - s_heaplog_n) s_heaplog_n += (size_t)w;
     }
     ESP_LOGW(TAG, "heap after %s: %s", stage, ok ? "ok" : "CORRUPT");
@@ -1369,6 +1387,10 @@ void app_main(void)
          * handles appending to one file interleave into nonsense. */
         FILE *bf = fopen("/sdcard/DOLOS_RESET.LOG", "a");
         if (bf) {
+            if (s_rtc_magic == RTC_STAGE_MAGIC)
+                fprintf(bf, "  ^ previous boot died in stage '%s' with %u bytes of stack left\n",
+                        s_rtc_stage, (unsigned)s_rtc_stack_left);
+            s_rtc_magic = 0;
             fprintf(bf, "boot: reason=%s crashes=%u safe=%d internal_free=%u largest=%u\n",
                     g_reset_reason, (unsigned)g_crashes, g_safe_boot ? 1 : 0,
                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),

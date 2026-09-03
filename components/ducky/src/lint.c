@@ -308,7 +308,10 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
                     uint8_t dk, dm, bk, bm;
                     if (layout_utf8_key(layout, cp, &uk, &um)) continue;  /* on the layout */
                     if (layout_utf8_combo(layout, cp, &dk, &dm, &bk, &bm)) continue;
-                    ducky_action_t probe2[24];
+                    /* 1440 bytes, in a loop, inside a function called at boot
+                     * from the main task. Static like the rest: one linter runs
+                     * at a time. */
+                    static ducky_action_t probe2[24];
                     if (unicode_seq(cp, os, probe2, 24) == 0) bad = true;
                 }
             }
