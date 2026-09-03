@@ -1,0 +1,473 @@
+REM ==========================================================
+REM  DOLOS MASTER TEST PAYLOAD
+REM
+REM  One payload that exercises the whole engine. Every check
+REM  prints what it EXPECTED and what it GOT, so a failure is
+REM  visible in the text itself - no need to know the answers.
+REM
+REM  Safe by construction: it types only into whatever text
+REM  field has focus. No GUI key, no launcher, no CTRL/ALT
+REM  chord that any editor treats as a command, no mouse
+REM  clicks, no file or system access.
+REM
+REM  Open a plain text editor, click into it, then fire.
+REM ==========================================================
+DEFAULTDELAY 12
+DELAY 1500
+STRINGLN ################ DOLOS MASTER TEST ################
+
+REM ==========================================================
+REM  SECTION A - HOST AND ENVIRONMENT
+REM ==========================================================
+STRINGLN
+STRINGLN --- A. HOST AND ENVIRONMENT ---
+STRINGLN detected OS code (0=win 1=linux 2=mac) -> $_OS
+STRINGLN caps lock now   -> $_CAPSLOCK_ON
+STRINGLN num lock now    -> $_NUMLOCK_ON
+STRINGLN scroll lock now -> $_SCROLLLOCK_ON
+IF ($_OS == 2) THEN
+STRINGLN host reads as MAC - accented text below should be correct
+ELSE IF ($_OS == 1) THEN
+STRINGLN host reads as LINUX
+ELSE
+STRINGLN host reads as WINDOWS
+END_IF
+
+REM ==========================================================
+REM  SECTION B - VARIABLES AND ARITHMETIC
+REM ==========================================================
+STRINGLN
+STRINGLN --- B. VARIABLES AND ARITHMETIC ---
+VAR $a = 12
+VAR $b = 5
+VAR $c = 0
+STRINGLN a=12 b=5
+VAR $c = $a + $b
+STRINGLN add.                       expect 17       got $c
+VAR $c = $a - $b
+STRINGLN subtract.                  expect 7        got $c
+VAR $c = $a * $b
+STRINGLN multiply.                  expect 60       got $c
+VAR $c = $a / $b
+STRINGLN divide (integer).          expect 2        got $c
+VAR $c = $a % $b
+STRINGLN modulo.                    expect 2        got $c
+VAR $c = $a + $b * 2
+STRINGLN precedence: * before +.    expect 22       got $c
+VAR $c = ($a + $b) * 2
+STRINGLN parentheses override it.   expect 34       got $c
+VAR $c = $a * $b + $a / $b
+STRINGLN mixed precedence.          expect 62       got $c
+VAR $c = (($a + 3) * 2) - ($b * 2)
+STRINGLN nested parentheses.        expect 20       got $c
+VAR $c = 0 - $a
+STRINGLN negative result.           expect -12      got $c
+VAR $c = $a * 0
+STRINGLN multiply by zero.          expect 0        got $c
+VAR $c = $a / 1
+STRINGLN divide by one.             expect 12       got $c
+VAR $c = $a % 1
+STRINGLN modulo one.                expect 0        got $c
+VAR $c = 1000 * 1000
+STRINGLN large product.             expect 1000000  got $c
+VAR $c = $a + $a + $a + $a
+STRINGLN repeated operand.          expect 48       got $c
+VAR $c = $a
+VAR $c = $c + 30
+STRINGLN self-assignment.           expect 42       got $c
+
+REM ==========================================================
+REM  SECTION C - COMPARISONS
+REM ==========================================================
+STRINGLN
+STRINGLN --- C. COMPARISONS ---
+VAR $c = $a > $b
+STRINGLN greater.                       expect 1 got $c
+VAR $c = $a < $b
+STRINGLN less.                          expect 0 got $c
+VAR $c = $a >= 12
+STRINGLN greater-or-equal, equal case.  expect 1 got $c
+VAR $c = $a <= 11
+STRINGLN less-or-equal, false case.     expect 0 got $c
+VAR $c = $a == 12
+STRINGLN equality.                      expect 1 got $c
+VAR $c = $a != 12
+STRINGLN inequality.                    expect 0 got $c
+VAR $c = $b > 5
+STRINGLN boundary, strictly greater.    expect 0 got $c
+VAR $c = $b >= 5
+STRINGLN boundary, or-equal.            expect 1 got $c
+
+REM ==========================================================
+REM  SECTION D - CONTROL FLOW
+REM ==========================================================
+STRINGLN
+STRINGLN --- D. CONTROL FLOW ---
+VAR $t = 0
+IF ($a > $b) THEN
+STRINGLN if.        taken       (correct)
+ELSE
+STRINGLN if.        NOT TAKEN   (WRONG)
+END_IF
+IF ($a < $b) THEN
+STRINGLN else.      wrong branch (WRONG)
+ELSE
+STRINGLN else.      taken        (correct)
+END_IF
+VAR $k = 3
+IF ($k == 1) THEN
+STRINGLN chain. branch A (WRONG)
+ELSE IF ($k == 2) THEN
+STRINGLN chain. branch B (WRONG)
+ELSE IF ($k == 3) THEN
+STRINGLN chain. branch C (correct)
+ELSE
+STRINGLN chain. fallthrough (WRONG)
+END_IF
+VAR $i = 0
+VAR $sum = 0
+WHILE ($i < 10)
+VAR $i = $i + 1
+VAR $sum = $sum + $i
+END_WHILE
+STRINGLN while 1..10.               expect 55  got $sum
+VAR $i = 0
+WHILE ($i > 0)
+STRINGLN zero-iteration body RAN (WRONG)
+VAR $i = $i - 1
+END_WHILE
+STRINGLN zero-iteration loop skipped correctly
+VAR $r = 0
+VAR $n = 0
+WHILE ($r < 3)
+VAR $r = $r + 1
+VAR $q = 0
+WHILE ($q < 4)
+VAR $q = $q + 1
+VAR $n = $n + 1
+END_WHILE
+END_WHILE
+STRINGLN nested loops 3x4.          expect 12  got $n
+VAR $d = 0
+VAR $i = 0
+WHILE ($i < 5)
+VAR $i = $i + 1
+IF ($i == 3) THEN
+VAR $d = 99
+END_IF
+END_WHILE
+STRINGLN if inside while.           expect 99  got $d
+
+REM ==========================================================
+REM  SECTION E - FUNCTIONS
+REM ==========================================================
+STRINGLN
+STRINGLN --- E. FUNCTIONS ---
+VAR $calls = 0
+FUNCTION bump()
+VAR $calls = $calls + 1
+END_FUNCTION
+FUNCTION addfive()
+VAR $c = $c + 5
+END_FUNCTION
+VAR $c = 0
+bump()
+bump()
+bump()
+STRINGLN three calls.               expect 3   got $calls
+addfive()
+addfive()
+STRINGLN function mutates a var.    expect 10  got $c
+VAR $i = 0
+WHILE ($i < 4)
+VAR $i = $i + 1
+bump()
+END_WHILE
+STRINGLN calls from a loop.         expect 7   got $calls
+
+REM ==========================================================
+REM  SECTION F - DEFINES
+REM ==========================================================
+STRINGLN
+STRINGLN --- F. DEFINES ---
+DEFINE #GREETING hello-from-a-define
+DEFINE #NUMBER 4242
+STRINGLN text define.  -> #GREETING
+STRINGLN numeric define -> #NUMBER
+DEFINE #NESTED #GREETING
+STRINGLN define of a define -> #NESTED
+
+REM ==========================================================
+REM  SECTION G - STRING BLOCKS
+REM ==========================================================
+STRINGLN
+STRINGLN --- G. STRING BLOCKS ---
+STRINGLN the next four lines must be separate:
+STRINGLN_BLOCK
+alpha one
+bravo two
+charlie three
+delta four
+END_STRINGLN
+STRINGLN the next three fragments must be on ONE line:
+STRING_BLOCK
+joined-A
+joined-B
+joined-C
+END_STRING
+STRINGLN
+STRINGLN punctuation: <>{}[]()|/~^%@!&*+=_-:;,.?
+STRINGLN quotes: "double" and 'single' and `backtick`
+
+REM ==========================================================
+REM  SECTION H - LONG STRINGS (continuation across the action buffer)
+REM ==========================================================
+STRINGLN
+STRINGLN --- H. LONG STRINGS (continuation across the action buffer) ---
+REM  The action buffer holds 192 entries. Anything longer must be
+REM  continued, not silently cut off. Each line ends in _END.
+STRINGLN LEN0150_ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH_END
+STRINGLN   ^ that line should be 150 characters and finish with _END
+STRINGLN LEN0200_ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEF_END
+STRINGLN   ^ that line should be 200 characters and finish with _END
+STRINGLN LEN0400_ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWX_END
+STRINGLN   ^ that line should be 400 characters and finish with _END
+STRINGLN LEN0800_ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH_END
+STRINGLN   ^ that line should be 800 characters and finish with _END
+STRINGLN LEN1200_ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQR_END
+STRINGLN   ^ that line should be 1200 characters and finish with _END
+STRINGLN DIGITS500_01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789_END
+STRINGLN   ^ 500 digits, repeating 0123456789, then _END
+
+REM ==========================================================
+REM  SECTION I - KEYS AND EDITING
+REM ==========================================================
+STRINGLN
+STRINGLN --- I. KEYS AND EDITING ---
+SHIFT a
+SHIFT b
+SHIFT c
+STRINGLN  <- expect ABC immediately before this arrow
+STRING teh
+LEFT
+LEFT
+DELETE
+END
+STRINGLN  <- expect 'th' then this arrow (the e was deleted)
+STRING MIDDLE
+HOME
+STRING [start]
+END
+STRINGLN [end]  <- expect [start]MIDDLE[end]
+STRING keepXXXX
+BACKSPACE
+BACKSPACE
+BACKSPACE
+BACKSPACE
+STRINGLN  <- expect the word keep before this arrow
+STRING abcdef
+LEFT
+LEFT
+LEFT
+STRING -
+END
+STRINGLN  <- expect abc-def
+STRING spaces
+SPACE
+SPACE
+STRING here
+STRINGLN  <- expect two spaces between the words
+STRING tabbed
+TAB
+STRINGLN after-tab  <- expect a tab between them
+
+REM ==========================================================
+REM  SECTION J - HOLD AND RELEASE
+REM ==========================================================
+STRINGLN
+STRINGLN --- J. HOLD AND RELEASE ---
+HOLD SHIFT
+STRING held-shift
+RELEASE
+STRINGLN  <- expect HELD-SHIFT in capitals
+STRING before
+HOLD SHIFT
+STRING MIDDLE
+RELEASE
+STRINGLN after  <- expect beforeMIDDLEafter with only the middle shifted
+
+REM ==========================================================
+REM  SECTION K - TIMING AND REPEAT
+REM ==========================================================
+STRINGLN
+STRINGLN --- K. TIMING AND REPEAT ---
+STRINGLN five 400ms delays follow, about 2 seconds:
+DELAY 400
+STRING .
+DELAY 400
+STRING .
+DELAY 400
+STRING .
+DELAY 400
+STRING .
+DELAY 400
+STRING .
+STRINGLN  done
+STRINGLN the next line must appear exactly 8 times:
+STRINGLN repeat-me
+REPEAT 7
+STRINGLN ^ that block should show 8 identical lines
+STRINGLN REPEAT with an argument, expect 6 dashes:
+REPEAT 6 STRING -
+STRINGLN
+STRINGDELAY 20
+STRINGLN this line types with a 20ms gap per character
+STRINGDELAY 0
+DEFAULTDELAY 5
+STRINGLN default delay lowered to 5ms for the rest
+
+REM ==========================================================
+REM  SECTION L - RANDOM GENERATORS
+REM ==========================================================
+STRINGLN
+STRINGLN --- L. RANDOM GENERATORS ---
+VAR $_RANDOM_MIN = 10
+VAR $_RANDOM_MAX = 99
+VAR $r1 = $_RANDOM_INT
+VAR $r2 = $_RANDOM_INT
+VAR $r3 = $_RANDOM_INT
+VAR $r4 = $_RANDOM_INT
+VAR $r5 = $_RANDOM_INT
+STRINGLN five randoms in 10..99 -> $r1 $r2 $r3 $r4 $r5
+STRINGLN   ^ all must be two digits, and not all identical
+VAR $_RANDOM_MIN = 1
+VAR $_RANDOM_MAX = 1
+VAR $r6 = $_RANDOM_INT
+STRINGLN degenerate range 1..1 -> expect 1 got $r6
+STRING random lowercase: 
+RANDOM_LOWERCASE_LETTER
+RANDOM_LOWERCASE_LETTER
+RANDOM_LOWERCASE_LETTER
+RANDOM_LOWERCASE_LETTER
+RANDOM_LOWERCASE_LETTER
+STRINGLN
+STRING random uppercase: 
+RANDOM_UPPERCASE_LETTER
+RANDOM_UPPERCASE_LETTER
+RANDOM_UPPERCASE_LETTER
+RANDOM_UPPERCASE_LETTER
+RANDOM_UPPERCASE_LETTER
+STRINGLN
+STRING random digits:    
+RANDOM_NUMBER
+RANDOM_NUMBER
+RANDOM_NUMBER
+RANDOM_NUMBER
+RANDOM_NUMBER
+STRINGLN
+
+REM ==========================================================
+REM  SECTION M - INTERNATIONAL TEXT
+REM ==========================================================
+STRINGLN
+STRINGLN --- M. INTERNATIONAL TEXT ---
+STRINGLN ascii baseline. the quick brown fox 0123456789
+STRINGLN ascii fallback. Gruesse aus Muenchen, Voila, Manana
+STRINGLN german.   Grüße aus München, schön, Ärger, Über
+STRINGLN french.   Voilà, très bien, ça va, hôtel, naïve
+STRINGLN spanish.  Mañana señor, niños, ¿qué?, ¡olé!
+STRINGLN nordic.   Åse Æble Øre, smörgås
+STRINGLN symbols.  £ ¥ € ¢ © ® ™ ° • …
+STRINGLN dashes.   en–dash em—dash guillemets « quoted »
+STRINGLN accents.  áéíóú àèìòù âêîôû äëïöü ãñõ
+STRINGLN capitals. ÁÉÍÓÚ ÀÈÌÒÙ ÄËÏÖÜ ÃÑÕ
+UNICODE 00E9
+UNICODE U+00FC
+STRINGLN  <- expect e-acute then u-umlaut before this arrow
+
+REM ==========================================================
+REM  SECTION N - MOUSE AND MEDIA
+REM ==========================================================
+STRINGLN
+STRINGLN --- N. MOUSE AND MEDIA ---
+STRINGLN watch the pointer trace a square and return (no clicks)
+MOUSEMOVE 15 0
+DELAY 40
+MOUSEMOVE 15 0
+DELAY 40
+MOUSEMOVE 15 0
+DELAY 40
+MOUSEMOVE 15 0
+DELAY 40
+MOUSEMOVE 0 15
+DELAY 40
+MOUSEMOVE 0 15
+DELAY 40
+MOUSEMOVE 0 15
+DELAY 40
+MOUSEMOVE 0 15
+DELAY 40
+MOUSEMOVE -15 0
+DELAY 40
+MOUSEMOVE -15 0
+DELAY 40
+MOUSEMOVE -15 0
+DELAY 40
+MOUSEMOVE -15 0
+DELAY 40
+MOUSEMOVE 0 -15
+DELAY 40
+MOUSEMOVE 0 -15
+DELAY 40
+MOUSEMOVE 0 -15
+DELAY 40
+MOUSEMOVE 0 -15
+DELAY 40
+STRINGLN pointer should be back where it started
+STRINGLN volume up then down, net change should be zero:
+MEDIA VOLUME_UP
+DELAY 120
+MEDIA VOLUME_DOWN
+STRINGLN volume returned
+
+REM ==========================================================
+REM  SECTION O - EDGE CASES AND LITERALS
+REM ==========================================================
+STRINGLN
+STRINGLN --- O. EDGE CASES AND LITERALS ---
+REM this comment must not appear
+REM: punctuated remark must not appear
+# hash comment must not appear
+REM_BLOCK
+STRINGLN THIS MUST NEVER BE TYPED
+SHIFT a
+END_REM
+STRINGLN comments and REM_BLOCK stayed inert
+STRINGLN literal keywords: IF THEN END_IF WHILE END_WHILE FUNCTION
+STRINGLN literal money and hash: 5 dollars, apartment number 9
+VAR $spaced    =    40
+STRINGLN odd spacing in VAR.        expect 40  got $spaced
+VAR $neg = 0 - 17
+STRINGLN negative literal.          expect -17 got $neg
+VAR $Odd_Name_123 = 123
+STRINGLN unusual variable name.     expect 123 got $Odd_Name_123
+STRINGLN
+STRINGLN   ^ that was an empty STRINGLN, expect one blank line
+STRINGLN trailing spaces after this arrow ->   
+STRINGLN a line with a single character:
+STRINGLN x
+
+REM ==========================================================
+REM  SUMMARY
+REM ==========================================================
+STRINGLN
+STRINGLN ################ MASTER TEST COMPLETE ################
+STRINGLN If every 'expect' matched its 'got', the engine is sound.
+STRINGLN Sections: A host, B arithmetic, C comparisons, D flow,
+STRINGLN E functions, F defines, G blocks, H long strings,
+STRINGLN I keys, J hold, K timing, L randoms, M international,
+STRINGLN N mouse, O edge cases.
+STRINGLN
+STRINGLN The lock-key test is NOT included: it blocks waiting for
+STRINGLN a key press and would stall this run. Use TB_LOCKKEYS.TXT.
+STOP_PAYLOAD
