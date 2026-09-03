@@ -46,7 +46,14 @@
 #define HID_KEY_LEFT    0x50
 #define HID_KEY_DOWN    0x51
 #define HID_KEY_UP      0x52
-#define HID_KEY_MENU    0x65
+/* The context-menu key beside right Ctrl. The USB HID tables call it
+ * "Application", and so does TinyUSB - whose own header defines a DIFFERENT
+ * HID_KEY_MENU at 0x76. Two headers defining one name to two values is a bug
+ * waiting for an include order to change, so use the standard name and the
+ * standard number. */
+#ifndef HID_KEY_APPLICATION
+#define HID_KEY_APPLICATION 0x65
+#endif
 #define HID_KEY_NONUS_HASH   0x32  /* ISO key next to Enter   */
 #define HID_KEY_NONUS_BSLASH 0x64  /* ISO key next to L-Shift */
 #define HID_KEY_SCROLLLOCK   0x47

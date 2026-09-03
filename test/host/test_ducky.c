@@ -250,4 +250,96 @@ TEST_MAIN_BEGIN
         CHECK(hid_modifier("CMD", &m) && m == HID_MOD_LGUI, "CMD is GUI (mac)");
         CHECK(hid_modifier("COMMAND", &m) && m == HID_MOD_LGUI, "COMMAND is GUI");
     }
+
+    SUITE("chords: a shifted symbol keeps the shift that produces it");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        ducky_action_t a[8];
+        /* US '+' is Shift+'='. Dropping the shift pressed '=' instead. */
+        int n = ducky_parse_line(&st, "CTRL +", a, 8);
+        CHECK(n == 1 && a[0].kind == DUCKY_KEY, "CTRL + parses");
+        CHECK((a[0].mods & HID_MOD_LCTRL) != 0, "ctrl is held");
+        CHECK((a[0].mods & HID_MOD_LSHIFT) != 0, "and so is the shift '+' needs");
+
+        /* ...but a letter must NOT gain one: CTRL A is Ctrl+A. */
+        n = ducky_parse_line(&st, "CTRL A", a, 8);
+        CHECK(n == 1 && (a[0].mods & HID_MOD_LSHIFT) == 0,
+              "CTRL A stays Ctrl+A, not Ctrl+Shift+A");
+        n = ducky_parse_line(&st, "CTRL a", a, 8);
+        CHECK(n == 1 && (a[0].mods & HID_MOD_LSHIFT) == 0, "and so does lowercase");
+    }
+
+    SUITE("keys: F13-F24 are real usages, not errors");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        ducky_action_t a[8];
+        uint8_t k = 0;
+        CHECK(hid_named_key("F13", &k) && k == 0x68, "F13 = 0x68, got 0x%02X", k);
+        CHECK(hid_named_key("F24", &k) && k == 0x73, "F24 = 0x73, got 0x%02X", k);
+        CHECK(!hid_named_key("F25", &k), "F25 does not exist");
+        CHECK(ducky_parse_line(&st, "CTRL F13", a, 8) == 1, "CTRL F13 is a valid chord");
+    }
+
+    SUITE("HOLD carries a normal key, not just modifiers");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        ducky_action_t a[8];
+        int n = ducky_parse_line(&st, "HOLD SPACE", a, 8);
+        CHECK(n == 1 && a[0].kind == DUCKY_HOLD, "HOLD SPACE parses to a hold");
+        CHECK(a[0].key == HID_KEY_SPACE, "and names the key the player must press");
+    }
+
+    SUITE("STRING: text longer than the action buffer is CONTINUED, not cut off");
+    {
+        /* 400 characters into a 192-action buffer used to type 192 of them and
+         * drop the rest in silence. */
+        ducky_state_t st; ducky_state_init(&st);
+        static ducky_action_t a[192];
+        char line[600]; int w = 0;
+        w += sprintf(line, "STRING ");
+        for (int i = 0; i < 400; i++) line[w++] = (char)('A' + (i % 26));
+        line[w] = 0;
+
+        int typed = 0, passes = 0;
+        int k = ducky_parse_line(&st, line, a, 192);
+        for (int i = 0; i < k; i++) if (a[i].kind == DUCKY_KEY) typed++;
+        while (st.pending && passes < 20) {
+            k = ducky_continue(&st, a, 192);
+            if (k <= 0) break;
+            for (int i = 0; i < k; i++) if (a[i].kind == DUCKY_KEY) typed++;
+            passes++;
+        }
+        CHECK(typed == 400, "all 400 characters are typed, got %d", typed);
+        CHECK(st.pending == NULL, "and nothing is left pending");
+
+        /* the letters must come out in order across the chunk boundary */
+        ducky_state_init(&st);
+        k = ducky_parse_line(&st, line, a, 192);
+        uint8_t first_key = a[0].key, boundary = a[k - 1].key;
+        k = ducky_continue(&st, a, 192);
+        CHECK(k > 0, "a second chunk follows");
+        CHECK(a[0].key != boundary,
+              "it resumes AFTER the character the first chunk ended on");
+        CHECK(a[0].key != first_key, "and does not restart from the beginning");
+    }
+
+    SUITE("STRINGLN: the newline waits for the end of a long line");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        static ducky_action_t a[192];
+        char line[600]; int w = sprintf(line, "STRINGLN ");
+        for (int i = 0; i < 400; i++) line[w++] = 'x';
+        line[w] = 0;
+        int k = ducky_parse_line(&st, line, a, 192);
+        bool early = false;
+        for (int i = 0; i < k; i++) if (a[i].key == HID_KEY_ENTER) early = true;
+        CHECK(!early, "no ENTER in the first chunk");
+        int enters = 0;
+        while (st.pending) {
+            k = ducky_continue(&st, a, 192);
+            if (k <= 0) break;
+            for (int i = 0; i < k; i++) if (a[i].key == HID_KEY_ENTER) enters++;
+        }
+        CHECK(enters == 1, "exactly one ENTER, at the very end (got %d)", enters);
+    }
 TEST_MAIN_END

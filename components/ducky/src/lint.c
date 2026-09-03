@@ -98,7 +98,7 @@ static void add(ducky_lint_t *out, int max, int *kept, int line, const char *msg
 int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
                ducky_lint_t *out, int max)
 {
-    static DOLOS_BIG_BSS ducky_state_t st; ducky_state_init(&st);
+    static ducky_state_t st; ducky_state_init(&st);
     st.layout = layout; st.target_os = os;
 
     /* The linter only asks whether a line parses to anything, and the commands
@@ -109,7 +109,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
     /* Static, and deliberately so: 8 KB of line buffer plus a ducky_state_t
      * cannot sit on the stack of the UI task. Every caller of ducky_lint()
      * holds the app lock, so there is one linter at a time. */
-    static DOLOS_BIG_BSS char line[LINT_LINE_MAX];
+    static char line[LINT_LINE_MAX];
     char tok[40];
     int problems = 0, kept = 0, lineno = 0;
     int in_block = 0;      /* inside STRING/STRINGLN ... END_STRING(LN) */

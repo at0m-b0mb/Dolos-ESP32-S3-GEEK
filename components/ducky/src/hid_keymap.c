@@ -106,12 +106,15 @@ bool hid_named_key(const char *tok, uint8_t *key)
     else if (ieq(tok, "NUMLOCK"))                     k = HID_KEY_NUMLOCK;
     else if (ieq(tok, "SCROLLLOCK") || ieq(tok, "SCROLL")) k = HID_KEY_SCROLLLOCK;
     else if (ieq(tok, "PAUSE") || ieq(tok, "BREAK"))  k = HID_KEY_PAUSE;
-    else if (ieq(tok, "MENU") || ieq(tok, "APP"))     k = HID_KEY_MENU;
+    else if (ieq(tok, "MENU") || ieq(tok, "APP"))     k = HID_KEY_APPLICATION;
     else if (ieq(tok, "PRINTSCREEN") || ieq(tok, "PRTSCR")) k = HID_KEY_PRTSCR;
     else if ((tok[0] == 'F' || tok[0] == 'f') && tok[1]) {
         int n = 0; for (const char *p = tok + 1; *p; p++) {
             if (*p < '0' || *p > '9') { n = 0; break; } n = n * 10 + (*p - '0'); }
-        if (n >= 1 && n <= 12) k = (uint8_t)(HID_KEY_F1 + (n - 1));
+        if (n >= 1 && n <= 12)       k = (uint8_t)(HID_KEY_F1 + (n - 1));
+        /* F13-F24 are real HID usages (0x68-0x73) and appear in payloads that
+         * bind uncommon shortcuts. They used to make the whole line invalid. */
+        else if (n >= 13 && n <= 24) k = (uint8_t)(0x68 + (n - 13));
         else return false;
     }
     else return false;

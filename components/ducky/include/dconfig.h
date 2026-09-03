@@ -53,6 +53,16 @@ typedef struct {
     char          wifi_pass[64];  /* WPA2 passphrase (>=8, required) */
     char          admin_user[24]; /* console admin username          */
     char          admin_pass[32]; /* console admin password (blank = random on LCD) */
+    /* Upstream network ("internet pass-through"). Opt-in: joining a network
+     * makes this device reachable from it. */
+    bool          sta_on;
+    char          sta_ssid[33];
+    char          sta_pass[64];
+    /* Mirror the ESP log to /sdcard/DOLOS_BOOT.LOG. OFF by default: it writes
+     * from whatever task logged, and that repeatedly destabilised the device.
+     * The core dump in flash is the dependable crash record. */
+    bool          bootlog;
+    bool          msc_enabled;    /* expose the card to the host at boot */
     uint8_t       msc_partition; /* MBR partition shared by ATTACKMODE STORAGE */
     ui_lock_t     ui_lock;        /* how much of the UI the button may reach   */
     bool          remote_fire;    /* admin default for remote-fire allow (still visible) */

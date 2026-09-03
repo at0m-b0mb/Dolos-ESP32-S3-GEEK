@@ -135,4 +135,30 @@ TEST_MAIN_BEGIN
         CHECK(back.wifi_pass[0] == 0,
               "a reloaded file carries no key - the device uses the one in NVS");
     }
+
+    SUITE("config: every parsed setting is also WRITTEN back");
+    {
+        /* Settings the writer forgot were silently lost at the next boot. */
+        dolos_config_t c; config_defaults(&c);
+        c.sta_on = true;
+        snprintf(c.sta_ssid, sizeof(c.sta_ssid), "HomeNet");
+        c.bootlog = true;
+        c.msc_enabled = true;
+        c.msc_partition = 3;
+        c.ui_lock = UI_LOCK_MENU;
+
+        char text[1024];
+        size_t n = config_write_text(&c, text, sizeof(text));
+        CHECK(n > 0, "the file was written");
+
+        dolos_config_t back; config_defaults(&back);
+        config_parse(text, &back);
+        CHECK(back.sta_on == c.sta_on, "uplink survives the round trip");
+        CHECK(strcmp(back.sta_ssid, c.sta_ssid) == 0, "uplink SSID survives, got '%s'", back.sta_ssid);
+        CHECK(back.bootlog == c.bootlog, "boot log survives");
+        CHECK(back.msc_enabled == c.msc_enabled, "storage sharing survives");
+        CHECK(back.msc_partition == c.msc_partition,
+              "storage partition survives, got %u", back.msc_partition);
+        CHECK(back.ui_lock == c.ui_lock, "ui lock survives");
+    }
 TEST_MAIN_END

@@ -399,10 +399,32 @@ bool dscript_is_consumed(const dscript_t *ds, const char *line)
 
 /* ------------------------------------------------------------------ init */
 
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
+
+dscript_t *dscript_alloc(void)
+{
+#ifdef ESP_PLATFORM
+    /* External RAM: this struct is tens of kilobytes of line buffer, and
+     * internal RAM is what the radio and the USB stack need. */
+    dscript_t *p = heap_caps_calloc(1, sizeof(dscript_t), MALLOC_CAP_SPIRAM);
+    if (!p) p = heap_caps_calloc(1, sizeof(dscript_t), MALLOC_CAP_DEFAULT);
+    return p;
+#else
+    return (dscript_t *)calloc(1, sizeof(dscript_t));
+#endif
+}
+
 bool dscript_init(dscript_t *ds, const char *text)
 {
     memset(ds, 0, sizeof(*ds));
     if (!text) return false;
+    /* Line offsets are uint16_t. Past 64 KB they wrap, and the interpreter
+     * would then read confidently from the wrong places - a silent wrong
+     * answer, which is the worst kind. Refuse with a reason instead. */
+    size_t total = strlen(text);
+    if (total > 0xFFFF) { ds->err = "payload is larger than 64 KB"; return false; }
     ds->text = text;
 
     /* index every line */
@@ -495,7 +517,13 @@ uint16_t    dscript_error_line(const dscript_t *ds) { return ds->err_line; }
 /* Replace every DEFINE name with its text, on whole-token boundaries so that
  * #FOO does not match inside #FOOBAR. Applied to each line before it is parsed,
  * which is exactly what the Ducky toolchain does at compile time. */
-static void expand_defines(dscript_t *ds, const char *in, char *out, size_t cap)
+/* Returns false if the expanded line did not FIT.
+ *
+ * It used to truncate in silence, which on this device means typing half a
+ * command into somebody's machine - a half-finished PowerShell line is not a
+ * smaller version of the payload, it is a different one. The caller turns a
+ * short buffer into a refusal with a line number instead. */
+static bool expand_defines(dscript_t *ds, const char *in, char *out, size_t cap)
 {
     size_t o = 0;
     for (const char *p = in; *p && o < cap - 1; ) {
@@ -510,16 +538,20 @@ static void expand_defines(dscript_t *ds, const char *in, char *out, size_t cap)
                 char before = p[-1];
                 if (isalnum((unsigned char)before) || before == '_') continue;
             }
-            o += (size_t)snprintf(out + o, cap - o, "%s", ds->def[i].val);
+            int w = snprintf(out + o, cap - o, "%s", ds->def[i].val);
+            if (w < 0 || (size_t)w >= cap - o) { out[cap - 1] = 0; return false; }
+            o += (size_t)w;
             p += nl;
             hit = true;
         }
         if (!hit) out[o++] = *p++;
+        if (*p && o >= cap - 1) { out[cap - 1] = 0; return false; }  /* ran out */
     }
     out[o < cap ? o : cap - 1] = 0;
+    return true;
 }
 
-static void expand_vars(dscript_t *ds, const char *in, char *out, size_t cap)
+static bool expand_vars(dscript_t *ds, const char *in, char *out, size_t cap)
 {
     size_t o = 0;
     for (const char *p = in; *p && o < cap - 1; ) {
@@ -530,14 +562,18 @@ static void expand_vars(dscript_t *ds, const char *in, char *out, size_t cap)
             name[n] = 0;
             int i = var_index(ds, name);
             if (i >= 0) {
-                o += (size_t)snprintf(out + o, cap - o, "%ld", (long)ds->var[i].val);
+                int w = snprintf(out + o, cap - o, "%ld", (long)ds->var[i].val);
+                if (w < 0 || (size_t)w >= cap - o) { out[cap - 1] = 0; return false; }
+                o += (size_t)w;
                 p = q;
                 continue;
             }
         }
         out[o++] = *p++;
+        if (*p && o >= cap - 1) { out[cap - 1] = 0; return false; }
     }
     out[o < cap ? o : cap - 1] = 0;
+    return true;
 }
 
 /* ------------------------------------------------------------------ next */
@@ -555,7 +591,10 @@ const char *dscript_next(dscript_t *ds)
          * text to type - sees the substituted text, exactly as the Ducky
          * toolchain would have produced it at compile time. */
         if (ds->ndefs) {
-            expand_defines(ds, buf, ds->out, sizeof(ds->out));
+            if (!expand_defines(ds, buf, ds->out, sizeof(ds->out))) {
+                fail(ds, "line is too long once its DEFINEs are substituted");
+                return NULL;
+            }
             memcpy(buf, ds->out, DS_LINE_MAX);
             buf[DS_LINE_MAX - 1] = 0;
         }
@@ -697,6 +736,30 @@ const char *dscript_next(dscript_t *ds)
             name[n] = 0;
             r = skip_ws(r);
             if (*r == '=') r++;
+            /* "VAR $x = FUNC()" must capture the return value exactly as
+             * "$x = FUNC()" does. Only the second form was handled, so a
+             * declaration that called a function silently evaluated to
+             * nothing - which is how the T3 test caught it. */
+            {
+                const char *rhs = skip_ws(r);
+                char cn[DS_DEF_NAME]; size_t cl = 0;
+                const char *cq = rhs;
+                while ((isalnum((unsigned char)*cq) || *cq == '_') && cl < sizeof(cn) - 1) cn[cl++] = *cq++;
+                cn[cl] = 0;
+                const char *ct = skip_ws(cq);
+                if (cl && ct[0] == '(' && ct[1] == ')') {
+                    int fi = -1;
+                    for (int i = 0; i < ds->nfns; i++) if (ieq(ds->fn[i].name, cn)) { fi = i; break; }
+                    if (fi >= 0) {
+                        if (ds->nret >= DS_MAX_DEPTH) { fail(ds, "functions nested too deeply"); return NULL; }
+                        var_set(ds, name, 0);            /* declare it before the call */
+                        snprintf(ds->ret_var[ds->nret], DS_DEF_NAME, "%s", name);
+                        ds->ret[ds->nret++] = ds->pc;
+                        ds->pc = (uint16_t)(ds->fn[fi].line + 1);
+                        continue;
+                    }
+                }
+            }
             int32_t v = eval(ds, r);
             if (!ds->err) var_set(ds, name, v);
             continue;
@@ -828,7 +891,10 @@ const char *dscript_next(dscript_t *ds)
         }
 
         /* ---- anything else types something: hand it back, expanded ---- */
-        expand_vars(ds, l, ds->out, sizeof(ds->out));
+        if (!expand_vars(ds, l, ds->out, sizeof(ds->out))) {
+            fail(ds, "line is too long once its variables are substituted");
+            return NULL;
+        }
         return ds->out;
 
     continue_outer:

@@ -112,12 +112,23 @@ size_t config_write_text(const dolos_config_t *c, char *out, size_t cap)
         "wifi_ssid=%s\n"
         "admin_user=%s\n"
         "remote_fire=%s\n"
-        "ui_lock=%s\n",
+        "ui_lock=%s\n"
+        /* These were parsed on the way in and never written on the way out, so
+         * an uplink, a boot log or a shared partition configured in the console
+         * was silently gone at the next power cycle. */
+        "uplink=%s\n"
+        "uplink_ssid=%s\n"
+        "bootlog=%s\n"
+        "storage=%s\n"
+        "storage_partition=%u\n",
         layout_key(c->layout), os_key(c->os), speed_key(c->speed),
         c->dry_run ? "on" : "off", (unsigned long)c->default_delay_ms,
         c->arm_pin, c->wifi_on ? "ap" : "off",
         c->wifi_ssid, c->admin_user,
-        c->remote_fire ? "on" : "off", ui_lock_key(c->ui_lock));
+        c->remote_fire ? "on" : "off", ui_lock_key(c->ui_lock),
+        c->sta_on ? "on" : "off", c->sta_ssid,
+        c->bootlog ? "on" : "off",
+        c->msc_enabled ? "on" : "off", (unsigned)c->msc_partition);
     if (n < 0 || (size_t)n >= cap) return 0;      /* truncated: report failure */
     return (size_t)n;
 }

@@ -35,12 +35,7 @@
  * Wi-Fi, TinyUSB and the HTTP server compete for - spending it here is what
  * crashed the device earlier in this project. On the ESP32 they live in PSRAM;
  * on a host they are ordinary statics. */
-#ifdef ESP_PLATFORM
-#include "esp_attr.h"
-#define DOLOS_BIG_BSS EXT_RAM_BSS_ATTR
-#else
-#define DOLOS_BIG_BSS
-#endif
+#define DOLOS_BIG_BSS   /* see dscript_alloc(): these live on the PSRAM heap */
 
 #ifdef __cplusplus
 extern "C" {
@@ -114,6 +109,13 @@ typedef struct {
     char     errbuf[DS_DEF_NAME + 56];
     uint16_t err_line;                 /* 1-based line the error came from   */
 } dscript_t;
+
+/* One shared interpreter instance, allocated from external RAM on the device
+ * and from the ordinary heap on a host. Callers use this rather than declaring
+ * a dscript_t: the struct carries kilobytes of line buffers, which belong on
+ * neither a task stack nor in the internal RAM that Wi-Fi and USB compete for.
+ * Returns NULL only if the allocation fails, which the caller must handle. */
+dscript_t *dscript_alloc(void);
 
 /* Index the text and pre-scan FUNCTION definitions. false if it is unusable. */
 bool dscript_init(dscript_t *ds, const char *text);

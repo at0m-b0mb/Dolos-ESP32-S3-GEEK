@@ -34,6 +34,10 @@ TEST_MAIN_BEGIN
         CHECK(hid_named_key("ENTER", &k) && k == HID_KEY_ENTER, "ENTER");
         CHECK(hid_named_key("F5", &k) && k == HID_KEY_F1 + 4, "F5");
         CHECK(hid_named_key("DEL", &k) && k == HID_KEY_DELETE, "DEL alias");
-        CHECK(!hid_named_key("F13", &k), "F13 out of range");
+        /* F13-F24 are real HID usages (0x68-0x73); F25 is where the row ends. */
+        CHECK(hid_named_key("F13", &k) && k == 0x68, "F13 = 0x68");
+        CHECK(hid_named_key("F24", &k) && k == 0x73, "F24 = 0x73");
+        CHECK(!hid_named_key("F25", &k), "F25 is past the end of the row");
+        CHECK(!hid_named_key("F0", &k), "there is no F0");
     }
 TEST_MAIN_END

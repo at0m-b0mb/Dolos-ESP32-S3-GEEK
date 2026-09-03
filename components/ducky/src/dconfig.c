@@ -83,7 +83,9 @@ bool config_key_known(const char *key)
 {
     static const char *KNOWN[] = {
         "layout", "os", "target_os", "speed", "dryrun", "defaultdelay",
-        "armpin", "pin", "ui_lock", "lock_ui", "storage_partition", "msc_partition",
+        "armpin", "pin", "ui_lock", "lock_ui", "storage", "msc",
+        "uplink", "sta", "uplink_ssid", "sta_ssid", "uplink_pass", "sta_pass",
+        "bootlog", "sdlog", "storage_partition", "msc_partition",
         "usb_vid", "usb_pid", "usb_mfr", "usb_product",
         "wifi", "wifi_ssid", "ssid", "wifi_pass", "wifi_password",
         "admin_user", "admin_pass", "admin_password", "remote_fire",
@@ -103,6 +105,14 @@ void config_parse(const char *text, dolos_config_t *c)
         size_t n = 0;
         while (*p && *p != '\n' && n < sizeof(line) - 1) line[n++] = *p++;
         line[n] = 0;
+        /* Discard the tail of an over-long line.
+         *
+         * Without this the loop resumed in the MIDDLE of the line, and whatever
+         * followed was parsed as a fresh setting - so one long value (a 70-char
+         * uplink password, say) could silently set an unrelated key to garbage.
+         * A truncated line is bad; a truncated line that invents a second
+         * setting is far worse. */
+        while (*p && *p != '\n') p++;
         if (*p == '\n') p++;
 
         char *s = line;
@@ -125,7 +135,15 @@ void config_parse(const char *text, dolos_config_t *c)
             else c->speed = SPEED_BALANCED;
         }
         else if (ieq(key, "dryrun") || ieq(key, "dry_run")) c->dry_run = truthy(val);
-        else if (ieq(key, "defaultdelay") || ieq(key, "default_delay")) c->default_delay_ms = (uint32_t)atoi(val);
+        else if (ieq(key, "defaultdelay") || ieq(key, "default_delay")) {
+            /* Clamped: a stray extra digit here pauses between EVERY command,
+             * and an unclamped value turns a payload into an apparent hang with
+             * no way to tell it from a crash. One minute is already absurd. */
+            long d = atoi(val);
+            if (d < 0) d = 0;
+            if (d > 60000) d = 60000;
+            c->default_delay_ms = (uint32_t)d;
+        }
         else if (ieq(key, "usb_vid") || ieq(key, "vid")) c->usb_vid = (uint16_t)strtol(val, 0, 0);
         else if (ieq(key, "usb_pid") || ieq(key, "pid_id") || ieq(key, "pid")) c->usb_pid = (uint16_t)strtol(val, 0, 0);
         else if (ieq(key, "usb_mfr") || ieq(key, "vendor")) { strncpy(c->usb_mfr, val, sizeof(c->usb_mfr)-1); c->usb_mfr[sizeof(c->usb_mfr)-1]=0; }
@@ -136,6 +154,11 @@ void config_parse(const char *text, dolos_config_t *c)
         else if (ieq(key, "admin_user")) cfg_str(c->admin_user, sizeof(c->admin_user), val);
         else if (ieq(key, "admin_pass") || ieq(key, "admin_password")) cfg_str(c->admin_pass, sizeof(c->admin_pass), val);
         else if (ieq(key, "remote_fire")) c->remote_fire = truthy(val);
+        else if (ieq(key, "uplink") || ieq(key, "sta")) c->sta_on = truthy(val);
+        else if (ieq(key, "uplink_ssid") || ieq(key, "sta_ssid")) cfg_str(c->sta_ssid, sizeof(c->sta_ssid), val);
+        else if (ieq(key, "uplink_pass") || ieq(key, "sta_pass")) cfg_str(c->sta_pass, sizeof(c->sta_pass), val);
+        else if (ieq(key, "bootlog") || ieq(key, "sdlog")) c->bootlog = truthy(val);
+        else if (ieq(key, "storage") || ieq(key, "msc")) c->msc_enabled = truthy(val);
         else if (ieq(key, "storage_partition") || ieq(key, "msc_partition")) {
             int v = atoi(val);
             if (v >= 1 && v <= 4) c->msc_partition = (uint8_t)v;

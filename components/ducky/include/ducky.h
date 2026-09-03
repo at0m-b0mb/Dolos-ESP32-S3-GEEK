@@ -75,9 +75,22 @@ typedef struct {
     uint32_t    string_delay_ms;  /* extra pause BETWEEN characters of a STRING */
     bool        in_rem_block;     /* inside REM_BLOCK ... END_REM               */
     uint32_t    rng_state;        /* RANDOM_*: deterministic unless reseeded    */
+    /* The unconsumed tail of a STRING too long for one action buffer.
+     * Points into `scratch`, so it is valid only until the next
+     * ducky_parse_line() - drain it with ducky_continue() first. */
+    const char *pending;
+    bool        pending_ln;       /* it was STRINGLN: ENTER once it finishes    */
 } ducky_state_t;
 
 void ducky_state_init(ducky_state_t *st);
+
+/* Emit the next chunk of a STRING that did not fit in one pass.
+ *
+ * A 400-character STRING used to return 192 actions and drop the remaining 208
+ * without a word - and long one-liners are exactly what real payloads type.
+ * Call this while st->pending is set, playing each chunk, until it clears.
+ * Do NOT call ducky_parse_line() in between: it reuses the same buffer. */
+int ducky_continue(ducky_state_t *st, ducky_action_t *out, int max);
 
 /* Parse ONE line into up to `max` actions. Returns the count written (may be 0
  * for comments / DEFAULTDELAY). For REPEAT n, returns 0 and sets st->repeat=n:

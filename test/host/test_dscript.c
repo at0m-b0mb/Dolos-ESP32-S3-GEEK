@@ -1,5 +1,6 @@
 #include "dolos_test.h"
 #include "dscript.h"
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -280,5 +281,89 @@ TEST_MAIN_BEGIN
         l = dscript_next(&d3);
         CHECK(l && strlen(l) > 6000, "a 6.8 KB line is not truncated, got %u chars",
               (unsigned)(l ? strlen(l) : 0));
+    }
+
+    SUITE("dscript: VAR $x = FUNC() captures the return value");
+    {
+        /* "$x = FUNC()" worked, but the DECLARATION form silently evaluated to
+         * nothing - the payload ran, produced no value, and said nothing about
+         * it. Found by running the T3 test payload through the real engine. */
+        static const char *p =
+            "VAR $in = 6\n"
+            "FUNCTION doubler()\n"
+            "VAR $out = $in * 2\n"
+            "RETURN $out\n"
+            "END_FUNCTION\n"
+            "VAR $result = doubler()\n"
+            "STRING got $result\n";
+        dscript_t *ds = dscript_alloc();
+        CHECK(ds != NULL, "interpreter allocated");
+        CHECK(dscript_init(ds, p), "payload indexed");
+        const char *out = NULL, *last = NULL;
+        while ((out = dscript_next(ds)) != NULL) last = out;
+        CHECK(dscript_error(ds) == NULL, "no runtime error: %s",
+              dscript_error(ds) ? dscript_error(ds) : "-");
+        int32_t v = 0;
+        CHECK(dscript_get(ds, "result", &v) && v == 12,
+              "VAR captured the return value, expected 12 got %ld", (long)v);
+        CHECK(last && strstr(last, "12") != NULL,
+              "and it substitutes into STRING: %s", last ? last : "(none)");
+        free(ds);
+    }
+
+    SUITE("dscript: oversized payloads are refused rather than mis-indexed");
+    {
+        /* Line offsets are 16-bit. A payload past 64 KB used to wrap them and
+         * the interpreter would read from the wrong offsets while reporting
+         * success - a silent wrong answer. */
+        static char big[70000];
+        /* 16 bytes written every 16 bytes: no embedded NUL, so strlen really
+         * is ~70 KB. Writing 15 of every 16 left a terminator in each gap and
+         * the string was 15 bytes long - the test passed nothing at all. */
+        for (size_t i = 0; i + 16 < sizeof(big); i += 16) memcpy(big + i, "STRING xxxxxxxx\n", 16);
+        big[sizeof(big) - 1] = 0;
+        dscript_t *ds = dscript_alloc();
+        CHECK(ds != NULL, "allocated");
+        bool ok = dscript_init(ds, big);
+        CHECK(!ok, "a 70 KB payload is refused");
+        CHECK(dscript_error(ds) != NULL, "and it says why: %s",
+              dscript_error(ds) ? dscript_error(ds) : "(silent)");
+        /* something comfortably inside the limit still works */
+        CHECK(dscript_init(ds, "STRING hello\nENTER\n"), "a normal payload still loads");
+        free(ds);
+    }
+
+    SUITE("expansion: a line too long once substituted is REFUSED, not cut short");
+    {
+        /* Typing half a command into a machine is not a smaller version of the
+         * payload - it is a different one. */
+        static dscript_t ds;
+        static char src[DS_LINE_MAX * 3];
+        int w = snprintf(src, sizeof(src), "DEFINE #BIG ");
+        for (int i = 0; i < DS_DEF_VAL - 2; i++) src[w++] = 'y';
+        w += snprintf(src + w, sizeof(src) - w, "\nSTRING ");
+        /* enough repetitions of the macro to blow past DS_LINE_MAX */
+        for (int i = 0; i < 100; i++) w += snprintf(src + w, sizeof(src) - w, "#BIG ");
+        src[w] = 0;
+
+        CHECK(dscript_init(&ds, src), "the script parses");
+        const char *l;
+        while ((l = dscript_next(&ds)) != NULL) { /* drain */ }
+        CHECK(dscript_error(&ds) != NULL, "it stops with an error rather than typing a fragment");
+        if (dscript_error(&ds))
+            CHECK(strstr(dscript_error(&ds), "too long") != NULL,
+                  "and the error says why: '%s'", dscript_error(&ds));
+    }
+
+    SUITE("expansion: an ordinary DEFINE still substitutes normally");
+    {
+        static dscript_t ds;
+        CHECK(dscript_init(&ds, "DEFINE #URL https://example.com/a.ps1\nSTRING get #URL now\n"),
+              "parses");
+        const char *l = dscript_next(&ds);
+        CHECK(l != NULL, "a line comes back");
+        if (l) CHECK(strstr(l, "https://example.com/a.ps1") != NULL,
+                     "the macro was substituted: '%s'", l);
+        CHECK(dscript_error(&ds) == NULL, "and nothing failed");
     }
 TEST_MAIN_END

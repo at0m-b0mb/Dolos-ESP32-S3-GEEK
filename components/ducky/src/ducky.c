@@ -102,6 +102,30 @@ void ducky_state_init(ducky_state_t *st)
     st->string_delay_ms = 0;
     st->in_rem_block = false;
     st->rng_state = 0x2545F491u;
+    st->pending = NULL;
+    st->pending_ln = false;
+}
+
+static int emit_string(const char *s, kb_layout_t layout, target_os_t os,
+                       uint32_t char_delay, ducky_action_t *out, int max,
+                       const char **endp);
+
+int ducky_continue(ducky_state_t *st, ducky_action_t *out, int max)
+{
+    if (!st || !st->pending || !out || max <= 0) return 0;
+    const char *end = st->pending;
+    int k = emit_string(st->pending, st->layout, st->target_os,
+                        st->string_delay_ms, out, max, &end);
+    if (end == st->pending) {        /* no progress: this character is untypable */
+        st->pending = NULL; st->pending_ln = false;
+        return k;
+    }
+    if (*end) { st->pending = end; return k; }   /* still more to come */
+    st->pending = NULL;
+    if (st->pending_ln && k < max) { memset(&out[k], 0, sizeof(out[k]));
+                                     out[k].kind = DUCKY_KEY; out[k].key = HID_KEY_ENTER; k++; }
+    st->pending_ln = false;
+    return k;
 }
 
 static int kw(const char *tok, const char *word)  /* case-insensitive equals */
@@ -113,10 +137,14 @@ static int kw(const char *tok, const char *word)  /* case-insensitive equals */
 
 /* Emit one KEY action per character of `s`. Returns count (<= max). */
 static int emit_string(const char *s, kb_layout_t layout, target_os_t os,
-                       uint32_t char_delay, ducky_action_t *out, int max)
+                       uint32_t char_delay, ducky_action_t *out, int max,
+                       const char **endp)
 {
     int n = 0; const char *p = s; bool first = true;
     while (n < max) {
+        /* Where this character began. When it will not fit, the cursor is put
+         * back here so the next pass retypes it instead of losing it. */
+        const char *start = p;
         uint32_t cp; int adv = utf8_next(&p, &cp);
         if (adv == 0) break;
         /* STRINGDELAY paces the characters of this line without slowing the
@@ -124,11 +152,11 @@ static int emit_string(const char *s, kb_layout_t layout, target_os_t os,
          * windows (a freshly opened dialog, a remote session), and a global
          * speed change is a blunt instrument for that. */
         if (!first && char_delay) {
-            if (n >= max) break;
+            if (n + 1 >= max) { p = start; break; }   /* room for delay AND key */
             memset(&out[n], 0, sizeof(out[n]));
             out[n].kind = DUCKY_DELAY; out[n].delay_ms = char_delay; n++;
         }
-        if (n >= max) break;
+        if (n >= max) { p = start; break; }
         if (cp < 0x80) {                       /* ASCII: use the target layout */
             uint8_t k, m;
             if (!hid_from_ascii_layout((char)cp, layout, &k, &m)) continue;
@@ -151,12 +179,13 @@ static int emit_string(const char *s, kb_layout_t layout, target_os_t os,
                 out[n].kind = DUCKY_KEY; out[n].key = bk; out[n].mods = bm; n++;
             } else {                           /* otherwise: OS Unicode method */
                 int adds = unicode_seq(cp, os, out + n, max - n);
-                if (adds == 0) break;
+                if (adds == 0) { p = start; break; }
                 n += adds;
             }
         }
         first = false;
     }
+    if (endp) *endp = p;
     return n;
 }
 
@@ -174,6 +203,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
                      ducky_action_t *out, int max)
 {
     st->repeat = 0;
+    st->pending = NULL; st->pending_ln = false;   /* scratch is about to be reused */
     if (!line || max <= 0) return 0;
 
     /* trim leading whitespace + trailing CR/LF into a working buffer */
@@ -383,13 +413,17 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         }
         return unicode_seq(cp, st->target_os, out, max);
     }
-    if (kw(cmd, "STRING"))   return emit_string(rest, st->layout, st->target_os,
-                                                st->string_delay_ms, out, max);
-    if (kw(cmd, "STRINGLN")) {
+    if (kw(cmd, "STRING") || kw(cmd, "STRINGLN")) {
+        const bool ln = kw(cmd, "STRINGLN");
+        const char *end = rest;
         int k = emit_string(rest, st->layout, st->target_os,
-                            st->string_delay_ms, out, max);
-        if (k < max) { out[k].kind = DUCKY_KEY; out[k].key = HID_KEY_ENTER;
-                       out[k].mods = 0; out[k].delay_ms = 0; k++; }
+                            st->string_delay_ms, out, max, &end);
+        if (*end) {                       /* more text than actions: continue it */
+            st->pending = end; st->pending_ln = ln;
+            return k;
+        }
+        if (ln && k < max) { memset(&out[k], 0, sizeof(out[k]));
+                             out[k].kind = DUCKY_KEY; out[k].key = HID_KEY_ENTER; k++; }
         return k;
     }
 
@@ -437,7 +471,18 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
                 uint8_t m, k;
                 if (hid_modifier(tok, &m))        mods |= m;
                 else if (hid_named_key(tok, &k)) { key = k; have_key = true; }
-                else if (p == 1 && hid_from_ascii_layout(tok[0], st->layout, &k, NULL)) { key = k; have_key = true; }
+                else if (p == 1) {
+                    uint8_t am = 0;
+                    if (hid_from_ascii_layout(tok[0], st->layout, &k, &am)) {
+                        key = k; have_key = true;
+                        /* Letters are named case-insensitively in a chord:
+                         * "CTRL A" means Ctrl+A, not Ctrl+Shift+A. Symbols are
+                         * the opposite - "CTRL +" needs the very shift that
+                         * PRODUCES '+', and throwing it away pressed the
+                         * unshifted key underneath it instead. */
+                        if (!isalpha((unsigned char)tok[0])) mods |= am;
+                    } else invalid = true;
+                }
                 else invalid = true;
                 p = 0;
             }

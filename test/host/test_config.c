@@ -53,4 +53,42 @@ TEST_MAIN_BEGIN
         CHECK(UI_LOCK_OFF < UI_LOCK_MENU && UI_LOCK_MENU < UI_LOCK_FULL,
               "levels are ordered off < menu < full");
     }
+
+    SUITE("config: an over-long line cannot invent a second setting");
+    {
+        /* The parser used to resume mid-line, so the tail of a long value was
+         * read as a new key=value pair. */
+        dolos_config_t c; config_defaults(&c);
+        char big[400];
+        int n = snprintf(big, sizeof(big), "uplink_pass=");
+        for (int i = 0; i < 200; i++) big[n++] = 'x';
+        n += snprintf(big + n, sizeof(big) - n, "\nlayout=de\n");
+        big[n] = 0;
+        config_parse(big, &c);
+        CHECK(c.layout == LAYOUT_DE,
+              "the line AFTER the long one is still parsed (got %s)", layout_name(c.layout));
+
+        /* and the tail must not have been read as its own setting */
+        dolos_config_t c2; config_defaults(&c2);
+        char evil[400];
+        int m = snprintf(evil, sizeof(evil), "wifi_ssid=");
+        for (int i = 0; i < 130; i++) evil[m++] = 'a';
+        m += snprintf(evil + m, sizeof(evil) - m, "speed=fast\n");
+        evil[m] = 0;
+        config_parse(evil, &c2);
+        CHECK(c2.speed == SPEED_BALANCED,
+              "the spliced tail did NOT set speed (got %s)", speed_name(c2.speed));
+    }
+
+    SUITE("config: default delay is clamped");
+    {
+        dolos_config_t c; config_defaults(&c);
+        config_parse("defaultdelay=999999999\n", &c);
+        CHECK(c.default_delay_ms <= 60000, "clamped, got %lu", (unsigned long)c.default_delay_ms);
+        config_parse("defaultdelay=-5\n", &c);
+        CHECK(c.default_delay_ms == 0, "negative becomes zero, got %lu", (unsigned long)c.default_delay_ms);
+        config_parse("defaultdelay=250\n", &c);
+        CHECK(c.default_delay_ms == 250, "a sane value is kept");
+    }
+
 TEST_MAIN_END
