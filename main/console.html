@@ -54,6 +54,9 @@ button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .b-danger{background:var(--danger);color:#fff}
 .b-warn{background:var(--warn);color:#fff}
 .b-sm{min-height:34px;padding:.32em .75em;font-size:.85rem}
+/* A button beside flexible text must keep its own width, never be squeezed
+   down to a vertical strip of letters. */
+.fireHead > button{flex:0 0 auto;white-space:nowrap}
 
 input,textarea,select{font:inherit;width:100%;color:var(--ink);background:var(--panel);
   border:1px solid var(--rim2);border-radius:var(--rs);padding:.6em .75em;
@@ -78,9 +81,14 @@ label.lbl{display:block;font-size:.72rem;letter-spacing:.06em;text-transform:upp
 .loginCard{width:100%;max-width:364px;background:var(--panel);border:1px solid var(--rim);
   border-radius:18px;padding:34px 28px;box-shadow:var(--shadow)}
 .brandRow{display:flex;align-items:center;gap:11px;justify-content:center}
-.mark{width:38px;height:28px;border-radius:7px;flex:0 0 auto;position:relative;background:var(--brand)}
-.mark::before{content:"";position:absolute;inset:6px 5px;border-radius:2px;
-  background:radial-gradient(circle at 5px 4px,rgba(255,255,255,.92) 1.4px,transparent 1.5px) 0 0/8px 7px}
+/* The keyboard emblem from the project banner (assets/banner.svg), so the
+   console, the README and the release all carry one mark. Original artwork -
+   deliberately NOT the USB trident, which is a USB-IF trademark and has no
+   business on something being sold. Drawn as an SVG rather than the tiled
+   radial-gradient it used to be, which rendered as a smear of dots. */
+.mark{flex:0 0 auto;display:block;width:38px;height:24px;color:var(--brand)}
+.mark .plate{fill:currentColor}
+.mark .keys{fill:#1c0a12}
 .wordmark{font-weight:700;letter-spacing:.2em;font-size:1.32rem}
 .sub{text-align:center;color:var(--faint);font-size:.72rem;letter-spacing:.14em;
   text-transform:uppercase;margin:.55em 0 26px;font-weight:600}
@@ -91,16 +99,35 @@ label.lbl{display:block;font-size:.72rem;letter-spacing:.06em;text-transform:upp
 /* shell */
 #app{display:none;max-width:880px;margin:0 auto;padding:0 var(--pad) 96px}
 .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;
+  flex-wrap:wrap;row-gap:9px;
   padding:13px 0 11px;background:color-mix(in srgb,var(--bg) 88%,transparent);
   backdrop-filter:saturate(1.6) blur(12px);border-bottom:1px solid var(--rim)}
-.topbar .mark{width:26px;height:20px}
-.topbar .wordmark{font-size:1rem}
+.topbar .mark{width:26px;height:17px}
+/* The wordmark must never be squeezed or clipped by what sits beside it: on a
+   phone the row could not fit the brand, the role badge, a three-way theme
+   control and a sign-out button, so they overlapped into each other. */
+.topbar .wordmark{font-size:1rem;flex:0 0 auto;white-space:nowrap}
 .grow{flex:1}
+
+/* Below this width the bar becomes two tidy rows - brand above, controls
+   below - instead of six items fighting over one line. */
+@media (max-width:620px){
+  /* Scoped to the TOP BAR's own spacer. `.grow` is a shared utility used in
+     cards too - retargeting it globally collapsed the fire-control text and
+     crushed its button into a one-letter-wide column. */
+  .topbar > .grow{flex:0 0 100%;height:0}
+  #roleChip{margin-right:auto}
+  .topbar{padding-bottom:9px}
+  .seg button{padding:.2em .55em;font-size:.73rem}
+}
 .chip{font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;font-weight:700;
-  padding:.3em .65em;border-radius:999px;border:1px solid var(--rim2);color:var(--dim);background:var(--panel2)}
+  padding:.3em .65em;border-radius:999px;border:1px solid var(--rim2);color:var(--dim);
+  background:var(--panel2);white-space:nowrap;flex:0 0 auto}
 .chip.admin{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 40%,transparent);
   background:var(--brandSoft)}
 .seg{display:inline-flex;border:1px solid var(--rim2);border-radius:999px;overflow:hidden;flex:0 0 auto}
+.seg button{white-space:nowrap}
+#logoutBtn{white-space:nowrap;flex:0 0 auto}
 .seg button{min-height:30px;padding:.2em .62em;font-size:.76rem;font-weight:600;border:0;border-radius:0;
   background:transparent;color:var(--dim);letter-spacing:.02em}
 .seg button:hover{background:var(--panel2);color:var(--ink)}
@@ -201,7 +228,7 @@ label.lbl{display:block;font-size:.72rem;letter-spacing:.06em;text-transform:upp
 <!-- ══ LOGIN ══ -->
 <section id="login">
   <div class="loginCard">
-    <div class="brandRow"><span class="mark"></span><h1 class="wordmark">DOLOS</h1></div>
+    <div class="brandRow"><svg class="mark" viewBox="0 0 32 20" role="img" aria-label="Dolos"><rect class="plate" x="0.5" y="1" width="31" height="18" rx="4.2"/><g class="keys"><circle cx="6.4" cy="7" r="1.5"/><circle cx="12.8" cy="7" r="1.5"/><circle cx="19.2" cy="7" r="1.5"/><circle cx="25.6" cy="7" r="1.5"/><rect x="8" y="12.4" width="16" height="2.8" rx="1.4"/></g></svg><h1 class="wordmark">DOLOS</h1></div>
     <div class="sub">Secure Console</div>
     <div class="field"><label class="lbl" for="u">Username</label>
       <input id="u" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus></div>
@@ -216,7 +243,7 @@ label.lbl{display:block;font-size:.72rem;letter-spacing:.06em;text-transform:upp
 <!-- ══ APP ══ -->
 <main id="app">
   <div class="topbar">
-    <span class="mark"></span><span class="wordmark">DOLOS</span>
+    <svg class="mark" viewBox="0 0 32 20" role="img" aria-label="Dolos"><rect class="plate" x="0.5" y="1" width="31" height="18" rx="4.2"/><g class="keys"><circle cx="6.4" cy="7" r="1.5"/><circle cx="12.8" cy="7" r="1.5"/><circle cx="19.2" cy="7" r="1.5"/><circle cx="25.6" cy="7" r="1.5"/><rect x="8" y="12.4" width="16" height="2.8" rx="1.4"/></g></svg><span class="wordmark">DOLOS</span>
     <span class="grow"></span>
     <span class="chip" id="roleChip">—</span>
     <div class="seg" id="themeSeg" role="group" aria-label="Colour theme">
