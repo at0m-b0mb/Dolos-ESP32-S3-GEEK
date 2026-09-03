@@ -937,6 +937,7 @@ static void ui_task(void *arg)
                      * credentials are on the CONSOLE INFO screen after reboot. */
                     nvs_handle_t nh;
                     if (nvs_open("dolos", NVS_READWRITE, &nh) == ESP_OK) {
+                        nvs_erase_key(nh, "wifi_ssid");   /* a new name as well */
                         nvs_erase_key(nh, "wifi_pass");
                         nvs_erase_key(nh, "admin_pass");
                         nvs_erase_key(nh, "consoleused");   /* show the new one */
@@ -1274,6 +1275,25 @@ static void ensure_credentials(void)
     bool dirty = false;
     size_t len;
 
+    /* A RANDOM network name, not one derived from the MAC.
+     *
+     * The SSID was "Dolos-" plus two bytes of the MAC address, which is fixed
+     * for the life of the board: the same name for ever, and one that anyone
+     * who has seen this device once can recognise and tie back to a specific
+     * unit. Minted once, kept in NVS so it survives a reboot, and replaced
+     * along with the rest by NEW CREDENTIALS. Setting wifi_ssid in DOLOS.CFG
+     * still overrides it. */
+    if (!s_cfg.wifi_ssid[0]) {
+        len = sizeof(s_cfg.wifi_ssid);
+        if (nvs_get_str(h, "wifi_ssid", s_cfg.wifi_ssid, &len) != ESP_OK) {
+            char sfx[9];
+            gen_secret(sfx, 8);                       /* 32^8 ~= 40 bits */
+            snprintf(s_cfg.wifi_ssid, sizeof(s_cfg.wifi_ssid), "Dolos-%s", sfx);
+            if (nvs_set_str(h, "wifi_ssid", s_cfg.wifi_ssid) != ESP_OK)
+                ESP_LOGE(TAG, "could not store the SSID - it will change on reboot");
+            dirty = true;
+        }
+    }
     if (!s_cfg.wifi_pass[0]) {
         len = sizeof(s_cfg.wifi_pass);
         if (nvs_get_str(h, "wifi_pass", s_cfg.wifi_pass, &len) != ESP_OK) {
