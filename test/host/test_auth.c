@@ -3,8 +3,10 @@
 #include <string.h>
 
 /* deterministic stubs so the LOGIC is tested without mbedTLS */
+int g_hash_calls;
 static void mock_hash(const char *pw, const uint8_t *salt, size_t sl, uint32_t iters, uint8_t out[32])
 {
+    g_hash_calls++;
     (void)iters;
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < sl; i++) { h ^= salt[i]; h *= 16777619u; }
@@ -120,5 +122,50 @@ TEST_MAIN_BEGIN
         CHECK(auth_delete_user(&m, "root"), "one of two admins can be deleted");
         CHECK(auth_verify(&m, "root", "pw-admin") == ROLE_NONE, "deleted account cannot sign in");
         CHECK(!auth_delete_user(&m, "nobody"), "deleting an unknown user fails");
+    }
+
+    SUITE("auth: a full session table evicts the stalest, it does not refuse");
+    {
+        /* Signing in AUTH_MAX_SESSIONS times used to fill the table and every
+         * later login was refused until one aged out - being locked out of your
+         * own device by your own logins. */
+        auth_store_t f; auth_init(&f, mock_hash, mock_rng, 1000);
+        auth_set_user(&f, "root", "pw", ROLE_ADMIN);
+        char first_tok[33] = {0};
+        for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
+            auth_session_t *x = auth_session_create(&f, ROLE_ADMIN, 1000 + i, 600000);
+            CHECK(x != NULL, "session %d created", i);
+            if (i == 0 && x) strcpy(first_tok, x->token);
+        }
+        auth_session_t *extra = auth_session_create(&f, ROLE_ADMIN, 2000, 600000);
+        CHECK(extra != NULL, "one more login still succeeds when the table is full");
+        CHECK(auth_session_lookup(&f, first_tok, 2000) == NULL,
+              "and it is the OLDEST session that was dropped");
+    }
+
+    SUITE("auth: an unknown user costs the same as a wrong password");
+    {
+        /* Returning early for an unknown name leaked which accounts exist:
+         * a real user paid for full PBKDF2, a bogus one returned at once. */
+        auth_store_t t2; auth_init(&t2, mock_hash, mock_rng, 1000);
+        auth_set_user(&t2, "real", "correct-horse", ROLE_ADMIN);
+        g_hash_calls = 0;
+        CHECK(auth_verify(&t2, "real", "wrong") == ROLE_NONE, "wrong password refused");
+        int calls_known = g_hash_calls;
+        g_hash_calls = 0;
+        CHECK(auth_verify(&t2, "ghost", "wrong") == ROLE_NONE, "unknown user refused");
+        int calls_unknown = g_hash_calls;
+        CHECK(calls_known == calls_unknown && calls_known == 1,
+              "both paths hash exactly once (known %d, unknown %d)",
+              calls_known, calls_unknown);
+        CHECK(auth_verify(&t2, "real", "correct-horse") == ROLE_ADMIN, "and the real login still works");
+    }
+
+    SUITE("auth: lockout backoff cannot wrap into a shorter lockout");
+    {
+        auth_store_t b; auth_init(&b, mock_hash, mock_rng, 1000);
+        for (int i = 0; i < 200; i++) auth_note_fail(&b, 1000);
+        CHECK(auth_locked(&b, 1000), "still locked after many failures");
+        CHECK(!auth_locked(&b, 1000 + 31u * 60u * 1000u), "and it does expire eventually");
     }
 TEST_MAIN_END

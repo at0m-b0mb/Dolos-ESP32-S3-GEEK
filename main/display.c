@@ -119,10 +119,15 @@ void display_flush(void)
     if (!s_ok) return;
     const int W = BOARD_LCD_H_RES, H = BOARD_LCD_V_RES;
 
-    if (!s_shadow || !s_tx) {              /* fallback: whole frame, swapped in place */
+    if (!s_shadow || !s_tx) {              /* degraded: whole frame, swapped in place */
         for (int i = 0; i < FB_PIX; i++) s_fb[i] = (uint16_t)((s_fb[i] << 8) | (s_fb[i] >> 8));
-        esp_lcd_panel_draw_bitmap(s_panel, 0, 0, W, H, s_fb);
-        xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(200));
+        xSemaphoreTake(s_tx_done, 0);      /* discard any stale completion */
+        if (esp_lcd_panel_draw_bitmap(s_panel, 0, 0, W, H, s_fb) == ESP_OK)
+            xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(200));
+        /* Swap back: s_fb IS the canvas the UI draws into, and leaving it in
+         * wire order means anything that reads a pixel back sees nonsense. It
+         * survives today only because every frame is cleared and redrawn. */
+        for (int i = 0; i < FB_PIX; i++) s_fb[i] = (uint16_t)((s_fb[i] << 8) | (s_fb[i] >> 8));
         return;
     }
 
@@ -154,8 +159,25 @@ void display_flush(void)
                 dst[i] = (uint16_t)((px << 8) | (px >> 8));         /* wire order    */
             }
         }
-        esp_lcd_panel_draw_bitmap(s_panel, 0, start, W, start + rows, s_tx);
-        /* wait for the DMA to finish before this buffer is reused */
-        xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(200));
+        /* Discard a stale completion before queueing.
+         *
+         * s_tx_done is binary. If an earlier transfer timed out and its
+         * callback arrived afterwards, the token is still sitting there, and
+         * the next wait would return INSTANTLY without this span having been
+         * sent - so the staging buffer gets refilled while the DMA is still
+         * reading it. That is precisely the corruption that put two spans of
+         * pixels on top of each other on the real device. */
+        xSemaphoreTake(s_tx_done, 0);
+        esp_err_t derr = esp_lcd_panel_draw_bitmap(s_panel, 0, start, W, start + rows, s_tx);
+        if (derr != ESP_OK) {
+            /* Nothing was queued, so no callback is coming: waiting would just
+             * burn 200 ms per span. Drop this frame and let the next one redraw
+             * - the shadow was already updated, so force a full repaint. */
+            ESP_LOGW(TAG, "draw_bitmap failed: %s", esp_err_to_name(derr));
+            memset(s_shadow, 0xA5, (size_t)FB_PIX * sizeof(uint16_t));
+            return;
+        }
+        if (xSemaphoreTake(s_tx_done, pdMS_TO_TICKS(200)) != pdTRUE)
+            ESP_LOGW(TAG, "display transfer did not complete in time");
     }
 }

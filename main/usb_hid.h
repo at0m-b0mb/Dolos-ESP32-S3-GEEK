@@ -35,6 +35,7 @@ bool usb_hid_wait_host_ready(uint32_t timeout_ms);
 void usb_hid_set_speed(uint8_t half_delay_ms);
 void usb_hid_tap(uint8_t mods, uint8_t key);            /* one key chord      */
 void usb_hid_hold(uint8_t mods);                        /* press + hold modifiers */
+void usb_hid_hold_key(uint8_t mods, uint8_t key);       /* ...and a normal key too */
 void usb_hid_key(uint8_t tap_mods, uint8_t held_after, uint8_t key); /* tap, keep held */
 void usb_hid_release(void);                             /* release everything */
 void usb_hid_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel);

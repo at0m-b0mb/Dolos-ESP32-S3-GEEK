@@ -17,7 +17,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
@@ -55,7 +57,15 @@ static const char *TAG = "dolos";
 #define ARMED_TMO_MS  8000u
 #define PIN_TMO_MS    15000u
 #define COUNTDOWN_MS  3000u
-#define MAX_PAYLOADS  16
+/* 32, not 16: the test set alone is 17 files and a real engagement card holds
+ * more. The scan silently stopped at the limit, so extra payloads simply did
+ * not exist as far as the picker was concerned - a confusing way to lose a
+ * file. 32 x 64 bytes of names is 2 KB, which is affordable. */
+#define MAX_PAYLOADS  32
+/* Consecutive crashed boots before the optional subsystems are skipped once.
+ * Four, not two: a single unlucky pair of resets should never cost you the
+ * console, and the retry below means even this is temporary. */
+#define SAFE_BOOT_AFTER 4
 
 static sdmmc_card_t *s_card;      /* retained for the storage window */
 static dui_mode_t   s_mode = DUI_SAFE;
@@ -98,6 +108,10 @@ static uint32_t          g_boot_ms;
 static char              g_admin_pw_show[20];
 
 static bool wifi_bring_up(void);   /* defined with the boot path, below */
+static bool mode_is_idle(dui_mode_t m);
+/* Set when a reload was refused because a payload was running; applied the
+ * moment the run ends. */
+static bool s_reload_pending;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static void lock(void)   { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
@@ -114,7 +128,10 @@ static bool sd_mount(void)
     host.slot = BOARD_SD_SPI_HOST;
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.gpio_cs = BOARD_SD_PIN_CS; slot.host_id = BOARD_SD_SPI_HOST;
-    esp_vfs_fat_sdmmc_mount_config_t mc = { .format_if_mount_failed = false, .max_files = 4 };
+    /* 6, not 4: the boot log now holds one handle for the whole session, and a
+     * run can have the payload, the audit log and the injection log open at the
+     * same time. Running out shows up as a mystery "cannot open" much later. */
+    esp_vfs_fat_sdmmc_mount_config_t mc = { .format_if_mount_failed = false, .max_files = 6 };
     if (esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot, &mc, &s_card) != ESP_OK) return false;
     /* Keep the card handle: the mass-storage window reads and writes sectors
      * directly, below the filesystem, so it needs the device rather than the
@@ -147,10 +164,27 @@ static void scan_payloads(void)
     }
     closedir(d);
     ESP_LOGI(TAG, "found %d payload(s) on SD", s_npayloads);
+    if (s_npayloads >= MAX_PAYLOADS)
+        ESP_LOGW(TAG, "payload list is full at %d - any further files on the card "
+                      "are not listed", MAX_PAYLOADS);
 }
 
 static void load_selected(void)
 {
+    /* NEVER rewrite the buffer the payload task is reading.
+     *
+     * payload_run() walks s_payload in place. Reloading underneath it - which
+     * uploading a payload, changing a setting or saving the config all did -
+     * splices two scripts together mid-injection and types the result into
+     * someone's machine. bridge_remote_select() had this guard; three other
+     * callers did not, so it lives here instead, where the danger actually is.
+     * The reload is not lost, only deferred until the run finishes. */
+    if (!mode_is_idle(s_mode)) {
+        s_reload_pending = true;
+        ESP_LOGW(TAG, "payload reload deferred: a run is in progress");
+        return;
+    }
+    s_reload_pending = false;
     if (s_npayloads > 0) {
         char path[96];
         snprintf(path, sizeof(path), "/sdcard/%s", s_names[s_sel]);
@@ -175,45 +209,88 @@ static void load_selected(void)
 
 /* ---- boot log to the SD card ----
  *
- * This device hides its serial port by design: TinyUSB takes the USB pins for
- * HID, so ESP_LOG output - including a panic - goes to a port that no longer
- * exists. With a card present we can keep the evidence instead: every log line
- * from boot is teed to /sdcard/DOLOS_BOOT.LOG and flushed immediately, so the
- * LAST LINE IN THE FILE is the last thing that happened before a crash.
- * Logging stops once the UI is up, so it costs nothing at run time. */
+ * This device hides its serial port by design: TinyUSB takes the USB pins, so
+ * ESP_LOG output - including a panic - goes to a port that no longer exists.
+ * With a card present the lines are kept instead.
+ *
+ * THE HOOK MUST NEVER TOUCH THE FILESYSTEM. It is called on whatever task
+ * happened to log, and some of those have small stacks: esp_timer runs on
+ * ~3.5 KB, and vfprintf() through FATFS needs more than it has left. Doing the
+ * write inline overflowed that stack and jumped through a poisoned frame -
+ * a crash the log existed to diagnose, caused by the log itself. The core dump
+ * caught it: crashed task 'esp_timer', pc 0xfffffffb, stack full of 0xa5a5.
+ *
+ * So the hook only formats into a small buffer and posts it to a queue, which
+ * costs a couple of hundred bytes of stack and never blocks. One writer task,
+ * with a stack of its own, does the file I/O. A full queue drops the line -
+ * losing a log line is always better than taking the device down. */
+#define BOOTLOG_QLEN   24
+#define BOOTLOG_LINE  160
+#define BOOTLOG_CAP  (192 * 1024)
+
 static FILE *s_bootlog;
 static vprintf_like_t s_prev_vprintf;
+static QueueHandle_t  s_bootlog_q;
+static long           s_bootlog_bytes;
+static volatile bool  s_bootlog_on;
 
 static int bootlog_vprintf(const char *fmt, va_list ap)
 {
-    if (s_bootlog) {
+    if (s_bootlog_on && s_bootlog_q) {
+        char line[BOOTLOG_LINE];
         va_list cp;
         va_copy(cp, ap);
-        vfprintf(s_bootlog, fmt, cp);
+        int n = vsnprintf(line, sizeof(line), fmt, cp);   /* bounded, no FILE */
         va_end(cp);
-        fflush(s_bootlog);          /* a crash must not lose the last line */
+        if (n > 0) xQueueSend(s_bootlog_q, line, 0);      /* never waits */
     }
     return s_prev_vprintf ? s_prev_vprintf(fmt, ap) : 0;
+}
+
+static void bootlog_task(void *arg)
+{
+    (void)arg;
+    char line[BOOTLOG_LINE];
+    for (;;) {
+        if (xQueueReceive(s_bootlog_q, line, portMAX_DELAY) != pdTRUE) continue;
+        if (!s_bootlog || !s_bootlog_on) continue;
+        size_t len = strlen(line);
+        fwrite(line, 1, len, s_bootlog);
+        fflush(s_bootlog);                    /* a crash must not lose it */
+        if ((s_bootlog_bytes += (long)len) > BOOTLOG_CAP) s_bootlog_on = false;
+    }
 }
 
 static void bootlog_open(void)
 {
     if (!s_sd_ok) return;
+    /* Opt-in. Mirroring the log to the card means writing from whatever task
+     * emitted the line, and that is what kept overflowing small stacks. The
+     * core dump records crashes without touching the filesystem at all. */
+    if (!s_cfg.bootlog) return;
     s_bootlog = fopen("/sdcard/DOLOS_BOOT.LOG", "a");
     if (!s_bootlog) return;
     fprintf(s_bootlog, "\n===== boot: reset_reason=%d =====\n", (int)esp_reset_reason());
     fflush(s_bootlog);
+
+    s_bootlog_q = xQueueCreate(BOOTLOG_QLEN, BOOTLOG_LINE);
+    if (!s_bootlog_q) { fclose(s_bootlog); s_bootlog = NULL; return; }
+    /* 4 KB of its own, so file I/O never runs on a caller's stack. */
+    if (xTaskCreate(bootlog_task, "bootlog", 4096, NULL, 1, NULL) != pdPASS) {
+        vQueueDelete(s_bootlog_q); s_bootlog_q = NULL;
+        fclose(s_bootlog); s_bootlog = NULL;
+        return;
+    }
+    s_bootlog_on = true;
     s_prev_vprintf = esp_log_set_vprintf(bootlog_vprintf);
 }
 
-static void bootlog_close(void)
+/* Mark the end of the boot sequence. Nothing is closed and nothing is freed:
+ * the hook and the writer task stay, so a panic AFTER boot is recorded too. */
+static void bootlog_boot_done(void)
 {
-    if (!s_bootlog) return;
-    fprintf(s_bootlog, "===== boot completed, UI running =====\n");
-    fflush(s_bootlog);
-    if (s_prev_vprintf) esp_log_set_vprintf(s_prev_vprintf);
-    fclose(s_bootlog);
-    s_bootlog = NULL;
+    if (!s_bootlog_on) return;
+    ESP_LOGI(TAG, "===== boot completed, UI running =====");
 }
 
 /* ---- audit log ---- */
@@ -225,10 +302,16 @@ static void audit_write(bool aborted)
     if (usb_msc_exposed()) { ESP_LOGW(TAG, "audit entry skipped: host holds the storage"); return; }
     FILE *fp = fopen("/sdcard/DOLOS_AUDIT.LOG", "a");
     if (!fp) return;
-    fprintf(fp, "run=%lu up_ms=%lu payload=%s lines=%d result=%s dry=%d layout=%s speed=%s\n",
+    /* "sent" is claimed only when something was actually typed. Zero executed
+     * lines is a FAILURE, and the reason goes in the log beside it. */
+    const char *why = payload_last_failure();
+    const char *result = aborted ? "aborted" : (s_last_lines > 0 ? "sent" : "FAILED");
+    fprintf(fp, "run=%lu up_ms=%lu payload=%s lines=%d result=%s dry=%d layout=%s speed=%s",
             (unsigned long)s_run_count, (unsigned long)now_ms(), s_payload_name, s_last_lines,
-            aborted ? "aborted" : "sent", s_cfg.dry_run ? 1 : 0,
+            result, s_cfg.dry_run ? 1 : 0,
             layout_name(s_cfg.layout), speed_name(s_cfg.speed));
+    if (s_last_lines <= 0 && !aborted) fprintf(fp, " reason=%s", why ? why : "payload produced no lines");
+    fputc('\n', fp);
     fclose(fp);
 }
 
@@ -306,6 +389,42 @@ static bool mode_is_idle(dui_mode_t m)
     return m == DUI_SAFE || m == DUI_DONE || m == DUI_MENU || m == DUI_INFO;
 }
 
+/* Escape a string so it is safe inside a JSON double-quoted value.
+ *
+ * Payload names, SSIDs and lint messages were interpolated raw. A Wi-Fi name
+ * containing a quote or a backslash - both perfectly legal in an SSID - made
+ * the status document unparseable, so the console's JSON.parse threw and the
+ * whole page went blank with nothing to explain it. */
+static void json_str(char *out, size_t cap, const char *in)
+{
+    size_t o = 0;
+    if (cap == 0) return;
+    for (const char *p = in ? in : ""; *p && o + 7 < cap; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\') { out[o++] = '\\'; out[o++] = (char)c; }
+        else if (c == '\n') { out[o++] = '\\'; out[o++] = 'n'; }
+        else if (c == '\r') { out[o++] = '\\'; out[o++] = 'r'; }
+        else if (c == '\t') { out[o++] = '\\'; out[o++] = 't'; }
+        else if (c < 0x20)  { o += (size_t)snprintf(out + o, cap - o, "\\u%04x", c); }
+        else out[o++] = (char)c;
+    }
+    out[o < cap ? o : cap - 1] = 0;
+}
+
+/* The UPSTREAM Wi-Fi password is a credential for someone else's network, and
+ * it earns the same treatment as ours: the device's own flash, never the
+ * removable card. Nothing persisted it at all, so an uplink set up in the
+ * console worked until the next power cycle and then quietly was not there. */
+static void secret_store(const char *key, const char *val)
+{
+    nvs_handle_t h;
+    if (nvs_open("dolos", NVS_READWRITE, &h) != ESP_OK) return;
+    if (val && *val) nvs_set_str(h, key, val);
+    else             nvs_erase_key(h, key);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
 /* ---- console bridge (called from the httpd task; guarded by s_lock) ---- */
 static const char *mode_str(dui_mode_t m)
 {
@@ -323,15 +442,22 @@ static bool safe_name(const char *n)
 void bridge_status_json(char *buf, size_t cap)
 {
     lock();
+    char e_payload[80], e_lint[80], e_ssid[80];
+    json_str(e_payload, sizeof(e_payload), s_payload_name);
+    json_str(e_lint,    sizeof(e_lint),    s_lint_first.msg);
+    json_str(e_ssid,    sizeof(e_ssid),    net_wifi_sta_ssid());
     snprintf(buf, cap,
         "{\"mode\":\"%s\",\"payload\":\"%s\",\"idx\":%d,\"count\":%d,\"layout\":\"%s\","
         "\"speed\":\"%s\",\"dry\":%s,\"usb\":%s,\"leds\":%d,\"remote_fire\":%s,\"lines\":%d,\"cur\":%d,"
-        "\"lint\":%d,\"lint_line\":%d,\"lint_msg\":\"%s\"}",
-        mode_str(s_mode), s_payload_name, s_sel + 1, s_npayloads > 0 ? s_npayloads : 1,
+        "\"lint\":%d,\"lint_line\":%d,\"lint_msg\":\"%s\","
+        "\"uplink\":%s,\"uplink_ssid\":\"%s\",\"uplink_ip\":\"%s\"}",
+        mode_str(s_mode), e_payload, s_sel + 1, s_npayloads > 0 ? s_npayloads : 1,
         layout_name(s_cfg.layout), speed_name(s_cfg.speed), s_cfg.dry_run ? "true" : "false",
         (!s_flash_mode && usb_hid_mounted()) ? "true" : "false", s_flash_mode ? 0 : usb_hid_leds(),
         g_remote_fire_enabled ? "true" : "false", s_total_lines, s_cur_line,
-        s_lint_problems, s_lint_first.line, s_lint_first.msg);
+        s_lint_problems, s_lint_first.line, e_lint,
+        net_wifi_sta_connected() ? "true" : "false",
+        e_ssid, net_wifi_sta_ip());
     unlock();
 }
 int bridge_list_payloads(char *out, size_t cap)
@@ -339,8 +465,11 @@ int bridge_list_payloads(char *out, size_t cap)
     lock();
     sbuf_t sb; sbuf_init(&sb, out, cap);
     sappend(&sb, "{\"payloads\":[");
-    for (int i = 0; i < s_npayloads; i++)
-        sappend(&sb, "%s\"%s\"", i ? "," : "", s_names[i]);
+    for (int i = 0; i < s_npayloads; i++) {
+        char e[80];
+        json_str(e, sizeof(e), s_names[i]);   /* a filename is not trusted text */
+        sappend(&sb, "%s\"%s\"", i ? "," : "", e);
+    }
     sappend(&sb, "]}");
     unlock();
     return (int)sbuf_len(&sb);
@@ -386,16 +515,30 @@ void bridge_get_config_text(char *buf, size_t cap)
 void bridge_settings_json(char *buf, size_t cap)
 {
     lock();
+    /* An SSID is user-supplied text going into a JSON document: escape it, or
+     * a network named with a quote makes the whole settings page unparseable.
+     * The uplink PASSWORD is deliberately never sent - the field is write-only,
+     * exactly like the console password. */
+    char e_ap[80], e_up[80];
+    json_str(e_ap, sizeof(e_ap), s_cfg.wifi_ssid);
+    json_str(e_up, sizeof(e_up), s_cfg.sta_ssid);
     snprintf(buf, cap,
         "{\"layout\":\"%s\",\"os\":\"%s\",\"speed\":\"%s\","
         "\"dryrun\":%s,\"defaultdelay\":%lu,\"armpin\":%s,"
         "\"uilock\":\"%s\",\"wifi\":%s,\"remotefire\":%s,"
-        "\"wifi_ssid\":\"%s\",\"sd\":%s}",
+        "\"wifi_ssid\":\"%s\",\"sd\":%s,"
+        /* These three exist because the console binds controls to them. Without
+         * them the Internet-uplink fields could never show what was set: they
+         * read back as undefined and rendered blank forever. */
+        "\"uplink\":%s,\"uplink_ssid\":\"%s\","
+        "\"bootlog\":%s,\"storage\":%s}",
         layout_name(s_cfg.layout), os_name(s_cfg.os), speed_name(s_cfg.speed),
         s_cfg.dry_run ? "true" : "false", (unsigned long)s_cfg.default_delay_ms,
         s_cfg.arm_pin[0] ? "true" : "false", ui_lock_key(s_cfg.ui_lock),
         s_cfg.wifi_on ? "true" : "false", s_cfg.remote_fire ? "true" : "false",
-        s_cfg.wifi_ssid[0] ? s_cfg.wifi_ssid : "", s_sd_ok ? "true" : "false");
+        e_ap, s_sd_ok ? "true" : "false",
+        s_cfg.sta_on ? "true" : "false", e_up,
+        s_cfg.bootlog ? "true" : "false", s_cfg.msc_enabled ? "true" : "false");
     unlock();
 }
 
@@ -423,6 +566,8 @@ bool bridge_set_setting(const char *key, const char *value)
     }
     unlock();
     if (changed) {
+        if (strcmp(before.sta_pass, s_cfg.sta_pass) != 0)
+            secret_store("sta_pass", s_cfg.sta_pass);
         /* Never echo a secret's VALUE: this log is teed to the SD card, which
          * is readable on any laptop. The key name is useful, the value is not
          * worth the exposure. */
@@ -448,20 +593,45 @@ bool bridge_set_config(const char *text)
     const char *p = text; char line[192];
     while (*p) {
         size_t n = 0; while (*p && *p != '\n' && n < sizeof(line) - 1) line[n++] = *p++;
-        line[n] = 0; if (*p == '\n') p++;
-        if (strstr(line, "wifi_pass=***") || strstr(line, "wifi_password=***"))
-            fprintf(fp, "wifi_pass=%s\n", s_cfg.wifi_pass);
-        else if (strstr(line, "admin_pass=***") || strstr(line, "admin_password=***"))
-            fprintf(fp, "admin_pass=%s\n", s_cfg.admin_pass);
+        line[n] = 0;
+        /* If the line was longer than the buffer, discard its tail rather than
+         * letting the remainder become a second, bogus setting on the next
+         * pass round the loop. */
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+        /* Secrets are NEVER written to the card - not even to "restore" a
+         * redacted line. An SD card is removable and readable on any laptop,
+         * and this path would have put the live Wi-Fi key and console password
+         * back into a plain text file, undoing the protection every other
+         * writer respects. The values stay in NVS; the line is dropped. */
+        if (strstr(line, "wifi_pass") == line || strstr(line, "wifi_password") == line ||
+            strstr(line, "admin_pass") == line || strstr(line, "admin_password") == line)
+            continue;
         else fprintf(fp, "%s\n", line);
     }
     fclose(fp);
     /* reload live settings (layout/speed/dry take effect now; wifi/usb need reboot) */
     lock();
+    /* Keep the secrets across the reload.
+     *
+     * config_defaults() clears every field, and the file no longer contains the
+     * Wi-Fi key or console password because we deliberately stopped writing
+     * them there. Without this, saving the config silently emptied both in
+     * memory - and the next attempt to bring the radio up would fail its
+     * ">= 8 character passphrase" check with no obvious reason why. They live
+     * in NVS; carry them over the reload. */
+    char keep_wifi[sizeof(s_cfg.wifi_pass)], keep_admin[sizeof(s_cfg.admin_pass)];
+    snprintf(keep_wifi,  sizeof(keep_wifi),  "%s", s_cfg.wifi_pass);
+    snprintf(keep_admin, sizeof(keep_admin), "%s", s_cfg.admin_pass);
+
     config_defaults(&s_cfg);
     FILE *rf = fopen("/sdcard/DOLOS.CFG", "r");
     if (rf) { char cb[512]; int m = (int)fread(cb, 1, sizeof(cb) - 1, rf); fclose(rf);
               if (m > 0) { cb[m] = 0; config_parse(cb, &s_cfg); } }
+    /* the file wins only if it actually set one */
+    if (!s_cfg.wifi_pass[0])  snprintf(s_cfg.wifi_pass,  sizeof(s_cfg.wifi_pass),  "%s", keep_wifi);
+    if (!s_cfg.admin_pass[0]) snprintf(s_cfg.admin_pass, sizeof(s_cfg.admin_pass), "%s", keep_admin);
+
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
     scan_payloads(); load_selected();
     unlock();
@@ -620,7 +790,14 @@ static void ui_task(void *arg)
                 s_mode = DUI_MENU; s_menu_sel = 0; stage_ms = t;
             }
             else if (e == BTN_TAP && s_npayloads > 1 && s_cfg.ui_lock < UI_LOCK_FULL) {
+                /* Under the lock: the console task reloads through the very
+                 * same path, and ducky_lint() keeps an 8 KB line buffer and a
+                 * parser as statics. Two tasks in there at once corrupt both the
+                 * payload text and the lint verdict - and that verdict is what
+                 * decides whether the device is allowed to arm. */
+                lock();
                 s_sel = (s_sel + 1) % s_npayloads; load_selected();
+                unlock();
             }
             else if (e == BTN_HOLD && !s_flash_mode && s_lint_problems == 0) {
                 if (s_cfg.arm_pin[0]) { s_mode = DUI_PINENTRY; s_pin_pos = 0; s_pin_cur = 1; stage_ms = t; }
@@ -665,7 +842,13 @@ static void ui_task(void *arg)
             break;
         case DUI_RUNNING:
             if (e == BTN_TAP) s_abort = true;
-            if (s_run_done) { audit_write(s_abort); s_mode = DUI_DONE; stage_ms = t; }
+            if (s_run_done) {
+                audit_write(s_abort);
+                s_mode = DUI_DONE; stage_ms = t;
+                /* the run is over: it is safe to pick up anything the console
+                 * changed while it was going */
+                if (s_reload_pending) { lock(); load_selected(); unlock(); }
+            }
             break;
         case DUI_DONE:
             if (e == BTN_TAP || t - stage_ms > 4000) s_mode = DUI_SAFE;
@@ -707,6 +890,8 @@ static void ui_task(void *arg)
         st.storage_part = usb_msc_partition();
         st.wifi_key = g_wifi_up ? s_cfg.wifi_pass : NULL;
         st.admin_user = s_cfg.admin_user[0] ? s_cfg.admin_user : "admin";
+        st.run_failed  = (s_mode == DUI_DONE && s_last_lines <= 0 && !s_abort);
+        st.run_fail_msg = payload_last_failure();
         st.lint_problems = s_lint_problems;
         st.lint_line = s_lint_first.line;
         st.lint_msg = s_lint_first.msg[0] ? s_lint_first.msg : NULL;
@@ -743,7 +928,26 @@ static void boot_guard_begin(void)
         nvs_close(h);
     }
     g_crashes = count;
-    g_safe_boot = (count >= 2);
+    /* The guard exists so a repeatable crash cannot brick the device. But it
+     * was too eager and too permanent: two crashes disabled the radio, and
+     * every later boot inherited that verdict, so a device that was fine came
+     * up crippled with no way back except erasing NVS.
+     *
+     * Now it takes FOUR consecutive crashes, and it always tries the radio
+     * again on the next boot afterwards - the count is cleared as soon as it
+     * degrades once. Safe boot is a single cautious retry, not a sentence. */
+    if (count >= SAFE_BOOT_AFTER) {
+        g_safe_boot = true;
+        count = 0;                    /* try again next time, don't stay off */
+        nvs_handle_t h2;
+        if (nvs_open("dolos", NVS_READWRITE, &h2) == ESP_OK) {
+            nvs_set_u8(h2, "crashes", 0);
+            nvs_commit(h2);
+            nvs_close(h2);
+        }
+    } else {
+        g_safe_boot = false;
+    }
     uint8_t used = 0;
     if (nvs_open("dolos", NVS_READONLY, &h) == ESP_OK) {
         if (nvs_get_u8(h, "consoleused", &used) == ESP_OK) g_console_used = (used != 0);
@@ -813,7 +1017,17 @@ static void gen_secret(char *out, size_t len)
 static bool wifi_bring_up(void)
 {
     if (g_wifi_up) return true;
+    /* Internal (DMA-capable) RAM is the scarce resource on this board, and the
+     * radio is the biggest consumer of it. Record what was left before it
+     * starts: a crash during bring-up looks identical whether the cause is a
+     * bug or simply no memory, and this is the number that tells them apart. */
+    ESP_LOGW(TAG, "internal heap before Wi-Fi: %u free, %u largest block",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     if (!net_wifi_start_ap(s_cfg.wifi_ssid, s_cfg.wifi_pass)) return false;
+    ESP_LOGW(TAG, "internal heap after  Wi-Fi: %u free, %u largest block",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     g_wifi_up = true;
     if (!g_console_up && g_crashes == 0) {
         if (console_server_start(s_cfg.admin_user, s_cfg.admin_pass, s_cfg.remote_fire)) {
@@ -862,6 +1076,12 @@ static void ensure_credentials(void)
                 ESP_LOGE(TAG, "could not store the admin password - it will change on reboot");
             dirty = true;
         }
+    }
+    /* Remembered, never generated: an absent uplink password is a valid state,
+     * so this only restores one the operator set. */
+    if (!s_cfg.sta_pass[0]) {
+        len = sizeof(s_cfg.sta_pass);
+        nvs_get_str(h, "sta_pass", s_cfg.sta_pass, &len);
     }
     if (dirty) nvs_commit(h);
     nvs_close(h);
@@ -923,7 +1143,7 @@ void app_main(void)
      * first crash drops only the HTTP console and keeps the access point, and
      * only a second one drops the radio entirely. The screen names the stage,
      * so a single power cycle says where the fault is. */
-    if (s_cfg.wifi_on && g_crashes < 2) {
+    if (s_cfg.wifi_on && !g_safe_boot) {
         if (wifi_bring_up()) {
             if (g_crashes != 0) {
                 ESP_LOGW(TAG, "previous boot crashed - access point only, no HTTP console");
@@ -944,5 +1164,5 @@ void app_main(void)
                       "The screen and button will not respond.");
     }
     vTaskDelay(pdMS_TO_TICKS(3000));   /* capture anything the UI logs early */
-    bootlog_close();
+    bootlog_boot_done();
 }

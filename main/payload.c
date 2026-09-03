@@ -15,6 +15,16 @@
 
 static const char *TAG = "payload";
 
+/* Why the last run did nothing. A run that types zero keystrokes and is then
+ * recorded as "sent" is worse than a crash: on an engagement the audit log is
+ * the evidence, and a silent no-op that looks like a success is a lie in it. */
+static char s_fail[64];
+void payload_set_fail(const char *why)
+{
+    snprintf(s_fail, sizeof(s_fail), "%s", why ? why : "");
+}
+const char *payload_last_failure(void) { return s_fail[0] ? s_fail : NULL; }
+
 /* ---- injection log -------------------------------------------------------
  * Every keystroke, exactly as it was attempted: the HID usage id, the
  * modifiers actually sent, how many retries the host needed, and the elapsed
@@ -162,25 +172,46 @@ static void restore_locks(const payload_ctx_t *ctx)
     ilog_note("  RESTORE_HOST_KEYBOARD_LOCK_STATE -> 0x%02X\n", usb_hid_leds());
 }
 
+/* Sleep, but keep listening for the stop button.
+ *
+ * The whole safety story of this device is that the operator can always halt an
+ * injection. That was only true between actions: a payload containing
+ * "DELAY 20000" ignored the button for twenty seconds, because the abort flag
+ * was read at the top of the action loop and nowhere else. A stop control that
+ * works "eventually" is not a stop control. Sleep in short slices instead and
+ * return the instant we are told to stop. */
+static void sleep_abortable(uint32_t ms, const payload_ctx_t *ctx)
+{
+    const uint32_t SLICE = 25;
+    while (ms) {
+        if (ctx->abort && *ctx->abort) return;
+        uint32_t chunk = ms < SLICE ? ms : SLICE;
+        vTaskDelay(pdMS_TO_TICKS(chunk));
+        ms -= chunk;
+    }
+}
+
 static int g_ilog_idx;    /* keystroke counter for the injection log */
 static int g_ilog_line;   /* payload line currently being played          */
 
 static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
                          const payload_ctx_t *ctx)
 {
-    uint8_t held = 0;   /* modifiers held across keys (Unicode sequences) */
+    uint8_t held = 0;       /* modifiers held across keys (Unicode sequences) */
+    uint8_t held_key = 0;   /* and a normal key, for "HOLD SPACE"             */
     for (int i = 0; i < n; i++) {
         if (ctx->abort && *ctx->abort) break;
         const ducky_action_t *a2 = &a[i];
-        if (a2->kind == DUCKY_DELAY)   { vTaskDelay(pdMS_TO_TICKS(a2->delay_ms)); continue; }
+        if (a2->kind == DUCKY_DELAY)   { sleep_abortable(a2->delay_ms, ctx); continue; }
         if (a2->kind == DUCKY_HOLD) {
             /* An Alt-held run on Windows is the Unicode keypad sequence. */
             if (a2->mods & HID_MOD_LALT) ensure_numlock(ctx);
             held |= a2->mods;
-            if (!ctx->dry_run) usb_hid_hold(held); else vTaskDelay(pdMS_TO_TICKS(2));
+            if (a2->key) held_key = a2->key;
+            if (!ctx->dry_run) usb_hid_hold_key(held, held_key); else vTaskDelay(pdMS_TO_TICKS(2));
             continue;
         }
-        if (a2->kind == DUCKY_RELEASE) { held = 0; if (!ctx->dry_run) usb_hid_release(); else vTaskDelay(pdMS_TO_TICKS(2)); continue; }
+        if (a2->kind == DUCKY_RELEASE) { held = 0; held_key = 0; if (!ctx->dry_run) usb_hid_release(); else vTaskDelay(pdMS_TO_TICKS(2)); continue; }
         if (a2->kind == DUCKY_WAIT) {
             /* Block until the host reports the lock state we are waiting for.
              * The LED state arrives on the HID OUT endpoint, so this is the
@@ -244,6 +275,10 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
                     g_wait_button = true;
                     while (g_wait_button && !(ctx->abort && *ctx->abort))
                         vTaskDelay(pdMS_TO_TICKS(20));
+                    /* Aborting out of the wait left the flag set, and the UI
+                     * swallows one button event while it is - so the first
+                     * press after a cancelled run did nothing at all. */
+                    g_wait_button = false;
                     break;
                 default: break;                  /* accepted, does nothing here */
             }
@@ -259,8 +294,8 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
             ilog_key(g_ilog_idx++, g_ilog_line, a2->key, mods);
         }
     }
-    if (held && !ctx->dry_run) usb_hid_release();   /* never leave modifiers stuck */
-    if (default_delay) vTaskDelay(pdMS_TO_TICKS(default_delay));
+    if ((held || held_key) && !ctx->dry_run) usb_hid_release();  /* never leave a key stuck */
+    if (default_delay) sleep_abortable(default_delay, ctx);
 }
 
 /* How many lines will actually be EXECUTED?
@@ -274,10 +309,12 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
  * no delays, and the same step limit that bounds a runaway payload. */
 static int count_exec_lines(const char *text)
 {
-    static DOLOS_BIG_BSS dscript_t probe;          /* static: 4 KB is too much for the stack */
-    if (!dscript_init(&probe, text)) return 0;
+    static dscript_t *probe;
+    if (!probe) probe = dscript_alloc();
+    if (!probe) return payload_count_lines(text);   /* fall back to raw lines */          /* static: 4 KB is too much for the stack */
+    if (!dscript_init(probe, text)) return 0;
     int n = 0;
-    while (dscript_next(&probe) != NULL) n++;
+    while (dscript_next(probe) != NULL) n++;
     return n;
 }
 
@@ -290,6 +327,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
      * Static is safe here: the state machine runs exactly one payload at a
      * time, and only ever from the payload task. */
     static ducky_action_t acts[192];
+    s_fail[0] = 0;
     g_ilog_idx = 0; g_ilog_line = 0;
     uint32_t drops_before = usb_hid_drops();
     ilog_open(ctx->name ? ctx->name : "?", ctx);
@@ -325,18 +363,32 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
      * FUNCTION itself and hands back only the lines that type something, with
      * $variables already substituted. Everything below is unchanged - the
      * player never learned the language. */
-    static DOLOS_BIG_BSS dscript_t ds;
-    if (!dscript_init(&ds, text)) {
+    static dscript_t *dsp;
+    if (!dsp) dsp = dscript_alloc();
+    if (!dsp) {
+        ESP_LOGE(TAG, "no memory for the script interpreter");
+        payload_set_fail("out of memory for the interpreter");
+        return 0;
+    }
+    dscript_t *ds = dsp;
+    if (!dscript_init(ds, text)) {
+        /* The screen used to fall back to "PAYLOAD PRODUCED NO KEYSTROKES"
+         * here, while the parser knew the exact line and reason. Say the
+         * useful thing: the operator is standing at the device. */
+        char why[64];
+        snprintf(why, sizeof(why), "LINE %u: %s",
+                 dscript_error_line(ds), dscript_error(ds) ? dscript_error(ds) : "rejected");
+        payload_set_fail(why);
         ESP_LOGE(TAG, "payload rejected: %s (line %u)",
-                 dscript_error(&ds), dscript_error_line(&ds));
+                 dscript_error(ds), dscript_error_line(ds));
         ilog_note("  ! payload rejected: %s (line %u)\n",
-                  dscript_error(&ds), dscript_error_line(&ds));
+                  dscript_error(ds), dscript_error_line(ds));
         ilog_close(0, drops_before);
         return 0;
     }
 
     const char *line;
-    while ((line = dscript_next(&ds)) != NULL) {
+    while ((line = dscript_next(ds)) != NULL) {
         if (ctx->abort && *ctx->abort) break;
         cur++;
         if (ctx->progress) ctx->progress(cur, total, ctx->user);
@@ -352,16 +404,37 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
             for (int r = 0; r < reps && !(ctx->abort && *ctx->abort); r++) {
                 int m = ducky_parse_line(&st, saved, acts, (int)(sizeof(acts) / sizeof(acts[0])));
                 play_actions(acts, m, st.default_delay_ms, ctx);
+                /* A long REPEAT froze the screen on one line number, which
+                 * reads exactly like a hung device. The interpreter counts
+                 * each repetition, so report them. */
+                cur++;
+                if (ctx->progress) ctx->progress(cur, total, ctx->user);
             }
+            cur--;                     /* the line itself was already counted */
         } else {
-            play_actions(acts, n, st.default_delay_ms, ctx);
+            /* A STRING longer than the action buffer arrives in pieces. The
+             * default delay belongs at the END of the line, so it is applied
+             * only by the chunk that finishes it - not sprinkled through the
+             * middle of one long line of text. */
+            play_actions(acts, n, st.pending ? 0 : st.default_delay_ms, ctx);
+            while (st.pending && !(ctx->abort && *ctx->abort)) {
+                int m = ducky_continue(&st, acts, (int)(sizeof(acts) / sizeof(acts[0])));
+                if (m <= 0) break;
+                play_actions(acts, m, st.pending ? 0 : st.default_delay_ms, ctx);
+            }
         }
     }
-    if (dscript_error(&ds)) {
+    if (dscript_error(ds)) {
+        if (cur == 0) {                       /* stopped before typing anything */
+            char why[64];
+            snprintf(why, sizeof(why), "LINE %u: %s",
+                     dscript_error_line(ds), dscript_error(ds));
+            payload_set_fail(why);
+        }
         ESP_LOGW(TAG, "payload stopped: %s (line %u)",
-                 dscript_error(&ds), dscript_error_line(&ds));
+                 dscript_error(ds), dscript_error_line(ds));
         ilog_note("  ! stopped: %s (line %u)\n",
-                  dscript_error(&ds), dscript_error_line(&ds));
+                  dscript_error(ds), dscript_error_line(ds));
     }
 
     ESP_LOGI(TAG, "payload %s (%d lines)%s", (ctx->abort && *ctx->abort) ? "ABORTED" : "finished", cur, ctx->dry_run ? " [dry-run]" : "");

@@ -111,19 +111,24 @@ static void reply_json(httpd_req_t *r, const char *status, const char *json)
 
 static int read_body(httpd_req_t *r, char *buf, size_t cap)
 {
-    int total = r->content_len;
+    /* content_len is a size_t. Narrowing it to int first meant a declared
+     * length above INT_MAX came out NEGATIVE, sailed past the size check, and
+     * then skipped the read loop entirely - so an absurd Content-Length was
+     * accepted as a valid EMPTY body instead of being refused. Compare in the
+     * type the field actually has. */
+    size_t total = r->content_len;
     /* Truncating silently is the wrong answer: for a payload upload it would
      * save a script that stops halfway through, with the console reporting
      * success. Refuse instead, and let the caller say so. */
-    if (total > (int)cap - 1) return BODY_TOO_LARGE;
-    int off = 0;
+    if (cap == 0 || total >= cap) return BODY_TOO_LARGE;
+    size_t off = 0;
     while (off < total) {
         int k = httpd_req_recv(r, buf + off, total - off);
         if (k <= 0) return -1;
-        off += k;
+        off += (size_t)k;
     }
     buf[off] = 0;
-    return off;
+    return (int)off;
 }
 
 /* minimal url-decode form value: key=...&... */
@@ -287,9 +292,17 @@ static esp_err_t h_status(httpd_req_t *r)
      * extend it - only the person can, via /api/extend. */
     size_t n = strlen(buf);
     if (n > 1 && buf[n - 1] == '}') {
-        snprintf(buf + n - 1, sizeof(buf) - n,
-                 ",\"session_s\":%lu}",
-                 (unsigned long)(auth_session_remaining_ms(sess, now_ms()) / 1000));
+        /* Build the tail separately and splice it only if it FITS. Writing in
+         * place with a length of (sizeof - n) was one byte short: on a full
+         * buffer it replaced the closing brace with a terminator and nothing
+         * else, and the console then received JSON it could not parse - so the
+         * whole status panel stopped updating. A status object without the
+         * extra field beats a truncated one. */
+        char tail[48];
+        int t = snprintf(tail, sizeof(tail), ",\"session_s\":%lu}",
+                         (unsigned long)(auth_session_remaining_ms(sess, now_ms()) / 1000));
+        if (t > 0 && (n - 1) + (size_t)t < sizeof(buf))
+            memcpy(buf + n - 1, tail, (size_t)t + 1);
     }
     reply_json(r, "200 OK", buf);
     return ESP_OK;
@@ -426,8 +439,19 @@ static esp_err_t h_audit(httpd_req_t *r)
 static esp_err_t h_remotefire(httpd_req_t *r)
 {
     if (!require(r, PERM_TOGGLE_REMOTE_FIRE, true)) return ESP_OK;
-    char body[64], en[8]; read_body(r, body, sizeof(body));
-    bool on = form_val(body, "enable", en, sizeof(en)) && (en[0] == '1' || en[0] == 't' || en[0] == 'o');
+    /* The return value used to be discarded. On a failed or oversized read the
+     * buffer is UNINITIALISED STACK, and it was then parsed to decide whether
+     * remote fire is on - reusing whatever an earlier request left behind. This
+     * is the one switch that must never move on its own, so a body that does
+     * not parse is refused outright rather than guessed at. */
+    char body[64], en[8];
+    int n = read_body(r, body, sizeof(body));
+    if (n < 0 || !form_val(body, "enable", en, sizeof(en))) {
+        reply_json(r, "400 Bad Request",
+                   "{\"err\":\"Say explicitly whether remote fire should be on or off.\"}");
+        return ESP_OK;
+    }
+    bool on = (en[0] == '1' || en[0] == 't' || en[0] == 'o');
     bridge_set_remote_fire_enabled(on);
     reply_json(r, "200 OK", on ? "{\"remote_fire\":1}" : "{\"remote_fire\":0}"); return ESP_OK;
 }
@@ -518,7 +542,13 @@ bool console_server_start(const char *admin_user, const char *admin_pass, bool r
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.max_uri_handlers = 24; cfg.lru_purge_enable = true; cfg.stack_size = 8192;
     httpd_handle_t srv = NULL;
+    /* Idempotent, for the same reason the Wi-Fi bring-up is: starting a second
+     * server on the same port fails, and re-running auth_init() would throw
+     * away every account. Being asked twice must be harmless. */
+    static bool started;
+    if (started) return true;
     if (httpd_start(&srv, &cfg) != ESP_OK) { ESP_LOGE(TAG, "httpd start failed"); return false; }
+    started = true;
 
     reg(srv, "/",               HTTP_GET,  h_root);
     reg(srv, "/api/login",      HTTP_POST, h_login);

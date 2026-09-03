@@ -32,4 +32,12 @@ const char *payload_load(char *buf, int cap);
 /* Play the payload. Blocks (call from a task). Honors *ctx->abort. */
 /* Plays the payload; returns the number of script lines executed. */
 int  payload_run(const char *text, const payload_ctx_t *ctx);
+
+/* Why the last run typed nothing, or NULL if it started normally.
+ *
+ * A run that executes zero lines used to be written into the audit log as
+ * "sent". On an engagement that log is the evidence, so a silent no-op
+ * recorded as a success is worse than a crash: it is a false record. */
+const char *payload_last_failure(void);
+void        payload_set_fail(const char *why);
 #endif

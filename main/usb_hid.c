@@ -144,7 +144,22 @@ static bool wait_endpoint(void)
     return true;
 }
 
-static void guard(void) { if (s_guard_us) esp_rom_delay_us(s_guard_us); }
+/* The settle margin must YIELD, not spin.
+ *
+ * esp_rom_delay_us() is a busy loop: it blocks the task without releasing the
+ * CPU. The "reliable" profile asks for 8 ms per keystroke, so a 200-character
+ * payload spent over a second and a half spinning - starving the idle task the
+ * watchdog feeds from, and every other task of equal or lower priority on this
+ * core. Whole milliseconds go through vTaskDelay (the tick is 1 kHz, so this is
+ * exact); only the sub-millisecond remainder is spun. */
+static void guard(void)
+{
+    if (!s_guard_us) return;
+    uint32_t ms = s_guard_us / 1000u;
+    uint32_t us = s_guard_us % 1000u;
+    if (ms) vTaskDelay(pdMS_TO_TICKS(ms));
+    if (us) esp_rom_delay_us(us);
+}
 
 static bool kb_report(uint8_t mods, const uint8_t *keys)
 {
@@ -152,10 +167,18 @@ static bool kb_report(uint8_t mods, const uint8_t *keys)
         if (!wait_endpoint()) break;
         if (tud_hid_keyboard_report(RID_KEYBOARD, mods, keys)) {
             s_last_retries = (uint16_t)attempt;
-            s_last_ok = true;
-            wait_endpoint();          /* the host has now taken THIS report */
+            /* The queue accepted it; delivery is only proven when the endpoint
+             * drains again. Ignoring this return reported a keystroke as sent
+             * that the host had not taken - the injection log then said "sent"
+             * for characters that never arrived. */
+            bool taken = wait_endpoint();
+            s_last_ok = taken;
+            if (!taken) {
+                s_drops++;
+                ESP_LOGW(TAG, "report queued but never collected by the host");
+            }
             guard();
-            return true;
+            return taken;
         }
         esp_rom_delay_us(200);
     }
@@ -231,16 +254,37 @@ void usb_hid_tap(uint8_t mods, uint8_t key)
     kb_report(0, NULL);
 }
 
-void usb_hid_hold(uint8_t mods) { kb_report(mods, NULL); }
+/* A NON-modifier key held down across reports - DuckyScript's "HOLD SPACE".
+ *
+ * The parser understood these all along and the player threw the key away:
+ * only the modifier byte was ever sent, so "HOLD SHIFT" worked and "HOLD SPACE"
+ * pressed nothing at all and said nothing about it. Keeping the key here means
+ * every report sent while a HOLD is active carries it, which is what "held"
+ * means to the host - the key stays down until RELEASE. */
+static uint8_t s_hold_key;
+
+void usb_hid_hold(uint8_t mods)
+{
+    uint8_t keys[6] = { s_hold_key, 0, 0, 0, 0, 0 };
+    kb_report(mods, s_hold_key ? keys : NULL);
+}
+
+void usb_hid_hold_key(uint8_t mods, uint8_t key)
+{
+    s_hold_key = key;
+    usb_hid_hold(mods);
+}
 
 void usb_hid_key(uint8_t tap_mods, uint8_t held_after, uint8_t key)
 {
-    uint8_t keys[6] = { key, 0, 0, 0, 0, 0 };
-    kb_report(tap_mods, key ? keys : NULL);
-    kb_report(held_after, NULL);       /* release the key, keep held modifiers */
+    /* The same usage must not appear twice in one report. */
+    uint8_t keys[6] = { key, (key != s_hold_key) ? s_hold_key : 0, 0, 0, 0, 0 };
+    kb_report(tap_mods, (key || s_hold_key) ? keys : NULL);
+    uint8_t still[6] = { s_hold_key, 0, 0, 0, 0, 0 };
+    kb_report(held_after, s_hold_key ? still : NULL);  /* key up, HOLD stays down */
 }
 
-void usb_hid_release(void) { kb_report(0, NULL); }
+void usb_hid_release(void) { s_hold_key = 0; kb_report(0, NULL); }
 
 void usb_hid_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel)
 {
