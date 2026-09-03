@@ -75,3 +75,15 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_CHECKSUM_SHA256=y
 CONFIG_ESP_COREDUMP_STACK_SIZE=1280
+
+# --- heap corruption detection -------------------------------------------
+# A heap overrun does not crash where it happens: it crashes in whichever
+# malloc next walks the poisoned free list, which was tinyusb's task stack and
+# had nothing to do with the bug. Comprehensive poisoning checks the canaries
+# on EVERY alloc and free, so the failure is reported at the moment the damaged
+# block is touched, naming it - instead of a backtrace into tlsf_malloc that
+# says nothing about the cause.
+#
+# Costs a little RAM and speed. Worth it until this is found; revisit before a
+# release build.
+CONFIG_HEAP_POISONING_COMPREHENSIVE=y
