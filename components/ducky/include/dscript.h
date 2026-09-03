@@ -29,6 +29,7 @@
 #define DOLOS_DSCRIPT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Parse buffers are kilobytes each, and internal RAM on this chip is what
@@ -116,6 +117,14 @@ typedef struct {
  * neither a task stack nor in the internal RAM that Wi-Fi and USB compete for.
  * Returns NULL only if the allocation fails, which the caller must handle. */
 dscript_t *dscript_alloc(void);
+
+/* The shared interpreter. 31 KB each, and never more than one in use at a
+ * time, so everything that needs one takes it from here. */
+dscript_t *dscript_shared(void);
+
+/* Large scratch buffers: external RAM on the device, plain memory on the host.
+ * Allocated once and kept - never freed, never on a task stack. */
+void *ducky_big_alloc(size_t n);
 
 /* Index the text and pre-scan FUNCTION definitions. false if it is unusable. */
 bool dscript_init(dscript_t *ds, const char *text);

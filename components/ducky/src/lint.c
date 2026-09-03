@@ -98,8 +98,13 @@ static void add(ducky_lint_t *out, int max, int *kept, int line, const char *msg
 int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
                ducky_lint_t *out, int max)
 {
-    static ducky_state_t st; ducky_state_init(&st);
-    st.layout = layout; st.target_os = os;
+    /* 8.7 KB, in external RAM rather than a static in internal. */
+    static ducky_state_t *stp;
+    if (!stp) stp = (ducky_state_t *)ducky_big_alloc(sizeof(*stp));
+    if (!stp) return 0;                      /* no memory: judge nothing */
+    ducky_state_t st_unused; (void)st_unused;
+    ducky_state_init(stp);
+    stp->layout = layout; stp->target_os = os;
 
     /* The linter only asks whether a line parses to anything, and the commands
      * that reach this call emit a handful of actions at most (STRING and the
@@ -117,7 +122,9 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
     /* Static, and deliberately so: 8 KB of line buffer plus a ducky_state_t
      * cannot sit on the stack of the UI task. Every caller of ducky_lint()
      * holds the app lock, so there is one linter at a time. */
-    static char line[LINT_LINE_MAX];
+    static char *line;
+    if (!line) line = (char *)ducky_big_alloc(LINT_LINE_MAX);
+    if (!line) return 0;
     char tok[40];
     int problems = 0, kept = 0, lineno = 0;
     int in_block = 0;      /* inside STRING/STRINGLN ... END_STRING(LN) */
@@ -127,9 +134,11 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
 
     /* Structural problems (an IF with no END_IF) are found by the interpreter
      * itself, so the linter and the runtime cannot disagree about them. */
-    static dscript_t probe;
-    if (!dscript_init(&probe, text ? text : "")) {
-        add(out, max, &kept, dscript_error_line(&probe), dscript_error(&probe));
+    /* Shared, and on the PSRAM heap - not a 31 KB static in internal RAM. */
+    dscript_t *probe = dscript_shared();
+    if (!probe) return 0;                       /* no memory: judge nothing */
+    if (!dscript_init(probe, text ? text : "")) {
+        add(out, max, &kept, dscript_error_line(probe), dscript_error(probe));
         return 1;
     }
 
@@ -159,7 +168,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
         size_t l = 0;
         bool truncated = false;
         while (*p && *p != '\n') {
-            if (l < sizeof(line) - 1) line[l++] = *p;
+            if (l < LINT_LINE_MAX   /* line is a POINTER: sizeof would be 8 */ - 1) line[l++] = *p;
             else truncated = true;
             p++;
         }
@@ -244,7 +253,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
             for (int q3 = 0; q3 < nfn; q3++) if (strcmp(base, fname[q3]) == 0) { is_call = true; break; }
             if (is_call) { any_cmd = true; continue; }
         }
-        if (dscript_is_consumed(&probe, line)) { any_cmd = true; continue; }
+        if (dscript_is_consumed(probe, line)) { any_cmd = true; continue; }
         if (lkw(tok, "REM_BLOCK")) { in_rem = true; continue; }
         if (lkw(tok, "END_REM"))   { in_rem = false; continue; }
         if (in_rem) continue;
@@ -324,8 +333,8 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
         }
 
         /* --- everything else: the real parser decides whether it means anything --- */
-        int n = ducky_parse_line(&st, line, acts, (int)(sizeof(acts) / sizeof(acts[0])));
-        if (n == 0 && st.repeat == 0) {
+        int n = ducky_parse_line(stp, line, acts, (int)(sizeof(acts) / sizeof(acts[0])));
+        if (n == 0 && stp->repeat == 0) {
             problems++; add(out, max, &kept, lineno, "unknown command");
             continue;
         }

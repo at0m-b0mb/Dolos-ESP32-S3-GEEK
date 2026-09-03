@@ -309,8 +309,7 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
  * no delays, and the same step limit that bounds a runaway payload. */
 static int count_exec_lines(const char *text)
 {
-    static dscript_t *probe;
-    if (!probe) probe = dscript_alloc();
+    dscript_t *probe = dscript_shared();
     if (!probe) return payload_count_lines(text);   /* fall back to raw lines */          /* static: 4 KB is too much for the stack */
     if (!dscript_init(probe, text)) return 0;
     int n = 0;
@@ -326,7 +325,11 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
      * panicked - taking the whole device (and the web console) down with it.
      * Static is safe here: the state machine runs exactly one payload at a
      * time, and only ever from the payload task. */
-    static ducky_action_t acts[192];
+    /* 11.5 KB of actions and 8.7 KB of parser state: external RAM, not the
+     * internal pool the radio and USB need. Allocated once, never freed. */
+    static ducky_action_t *acts;
+    if (!acts) acts = (ducky_action_t *)ducky_big_alloc(sizeof(ducky_action_t) * 192);
+    if (!acts) { payload_set_fail("out of memory for the action buffer"); return 0; }
     /* Start from a known keyboard state.
      *
      * HOLD keeps a key down until RELEASE, and a run that is aborted (or ends
@@ -359,7 +362,11 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
 
     /* static: ducky_state_t now carries an 8 KB scratch buffer, and one
      * payload runs at a time. */
-    static DOLOS_BIG_BSS ducky_state_t st; ducky_state_init(&st);
+    static ducky_state_t *stp;
+    if (!stp) stp = (ducky_state_t *)ducky_big_alloc(sizeof(*stp));
+    if (!stp) { payload_set_fail("out of memory for the parser"); return 0; }
+    ducky_state_t *st_p = stp; ducky_state_init(st_p);
+#define st (*st_p)
     st.rng_state = esp_random();      /* RANDOM_* differs every run */
     st.layout = ctx->layout;
     st.target_os = ctx->os;
@@ -370,8 +377,9 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
      * FUNCTION itself and hands back only the lines that type something, with
      * $variables already substituted. Everything below is unchanged - the
      * player never learned the language. */
-    static dscript_t *dsp;
-    if (!dsp) dsp = dscript_alloc();
+    /* The same shared instance: count_exec_lines() has finished with it by
+     * the time playback starts. */
+    dscript_t *dsp = dscript_shared();
     if (!dsp) {
         ESP_LOGE(TAG, "no memory for the script interpreter");
         payload_set_fail("out of memory for the interpreter");
@@ -413,7 +421,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
         if (ctx->progress) ctx->progress(cur, total, ctx->user);
 
         g_ilog_line = cur;
-        int n = ducky_parse_line(&st, line, acts, (int)(sizeof(acts) / sizeof(acts[0])));
+        int n = ducky_parse_line(&st, line, acts, (int)(192));
         ilog_note("  line %d: \"%s\" -> %d action(s)\n", cur, line, n);
 
         if (st.repeat > 0) {
@@ -421,7 +429,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
             strncpy(saved, st.last_cmd, sizeof(saved) - 1); saved[sizeof(saved) - 1] = 0;
             int reps = st.repeat;
             for (int r = 0; r < reps && !(ctx->abort && *ctx->abort); r++) {
-                int m = ducky_parse_line(&st, saved, acts, (int)(sizeof(acts) / sizeof(acts[0])));
+                int m = ducky_parse_line(&st, saved, acts, (int)(192));
                 play_actions(acts, m, st.default_delay_ms, ctx);
                 /* A long REPEAT froze the screen on one line number, which
                  * reads exactly like a hung device. The interpreter counts
@@ -437,7 +445,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
              * middle of one long line of text. */
             play_actions(acts, n, st.pending ? 0 : st.default_delay_ms, ctx);
             while (st.pending && !(ctx->abort && *ctx->abort)) {
-                int m = ducky_continue(&st, acts, (int)(sizeof(acts) / sizeof(acts[0])));
+                int m = ducky_continue(&st, acts, (int)(192));
                 if (m <= 0) break;
                 play_actions(acts, m, st.pending ? 0 : st.default_delay_ms, ctx);
             }
@@ -456,6 +464,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
                   dscript_error(ds), dscript_error_line(ds));
     }
 
+#undef st
     ESP_LOGI(TAG, "payload %s (%d lines)%s", (ctx->abort && *ctx->abort) ? "ABORTED" : "finished", cur, ctx->dry_run ? " [dry-run]" : "");
     ilog_close(g_ilog_idx, drops_before);
     return cur;

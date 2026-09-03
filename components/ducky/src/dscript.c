@@ -428,6 +428,37 @@ bool dscript_is_consumed(const dscript_t *ds, const char *line)
 #include "esp_heap_caps.h"
 #endif
 
+/* ONE interpreter, shared.
+ *
+ * dscript_t is 31 KB. There were three of them: two on the PSRAM heap for
+ * playback and a THIRD as a static inside the linter - which put it in
+ * internal RAM, the one pool the radio and the USB stack compete for, and the
+ * exact thing dscript_alloc() exists to avoid. None of them are ever live at
+ * the same time: linting is deferred while a payload runs, and the line count
+ * is finished before playback starts. Sharing one instance returns ~63 KB,
+ * over 30 KB of it internal. */
+/* Scratch that belongs in EXTERNAL RAM on the device.
+ *
+ * Anything of this size in internal RAM is taken from the pool the radio, USB
+ * and the SD driver need for DMA. On the host it is ordinary memory. */
+void *ducky_big_alloc(size_t n)
+{
+#ifdef ESP_PLATFORM
+    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
+    if (!p) p = heap_caps_calloc(1, n, MALLOC_CAP_DEFAULT);
+    return p;
+#else
+    return calloc(1, n);
+#endif
+}
+
+dscript_t *dscript_shared(void)
+{
+    static dscript_t *one;
+    if (!one) one = dscript_alloc();
+    return one;
+}
+
 dscript_t *dscript_alloc(void)
 {
 #ifdef ESP_PLATFORM
