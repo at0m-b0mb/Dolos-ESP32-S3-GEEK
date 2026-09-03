@@ -11,7 +11,19 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # 2MB quad PSRAM (framebuffer lives here)
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_QUAD=y
-CONFIG_SPIRAM_SPEED_80M=y
+# 40 MHz, not 80.
+#
+# Quad PSRAM at 80 MHz shares tight SPI timing with the flash on this part, and
+# it is a known stability risk. It matches every symptom we could not otherwise
+# explain: only the ONE payload large enough to generate sustained PSRAM reads
+# during linting corrupted memory, the fault never reproduced on the host (no
+# PSRAM), it was independent of firmware version, and it surfaced as damage in
+# unrelated places - a heap block header, a newlib FILE lock, whatever happened
+# to be touched next.
+#
+# The cost is PSRAM bandwidth, which here is a framebuffer and the payload text.
+# Correctness first; revisit only with evidence that 80 MHz is stable.
+CONFIG_SPIRAM_SPEED_40M=y
 
 # USB: TinyUSB in device mode, HID class only. This is what makes the board a
 # keyboard. It boots SAFE and only sends reports after the operator arms it.
