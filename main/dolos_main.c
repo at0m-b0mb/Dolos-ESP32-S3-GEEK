@@ -1348,10 +1348,21 @@ static void heap_checkpoint(const char *stage)
         if (w > 0 && (size_t)w < sizeof(s_heaplog) - s_heaplog_n) s_heaplog_n += (size_t)w;
     }
     ESP_LOGW(TAG, "heap after %s: %s", stage, ok ? "ok" : "CORRUPT");
-    if (s_sd_ok && s_heaplog_n) {
-        FILE *f = fopen("/sdcard/DOLOS_HEAP.LOG", "a");
-        if (f) { fwrite(s_heaplog, 1, s_heaplog_n, f); fclose(f); s_heaplog_n = 0; }
-    }
+    /* Deliberately does NOT write to the card here.
+     *
+     * Writing a diagnostic from the main task while the boot-log task is also
+     * writing means two tasks in FATFS at once, which is one of the things
+     * being investigated. A measurement must not perturb what it measures.
+     * Everything is buffered and flushed once, by heap_log_flush(). */
+}
+
+/* Called once boot is over, when nothing else is competing for the card. */
+static void heap_log_flush(void)
+{
+    if (!s_sd_ok || !s_heaplog_n) return;
+    FILE *f = fopen("/sdcard/DOLOS_HEAP.LOG", "a");
+    if (f) { fwrite(s_heaplog, 1, s_heaplog_n, f); fclose(f); }
+    s_heaplog_n = 0;
 }
 
 void app_main(void)
@@ -1468,6 +1479,7 @@ void app_main(void)
      * to say so loudly rather than pretend the device came up. */
     heap_checkpoint("before_ui_task");
     s_booting = false;
+    heap_log_flush();
     if (xTaskCreate(ui_task, "dolos_ui", 8192, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "FATAL: could not start the UI task - out of memory. "
                       "The screen and button will not respond.");

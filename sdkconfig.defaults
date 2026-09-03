@@ -22,7 +22,14 @@ CONFIG_TINYUSB_CDC_ENABLED=n
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # long filenames so payloads can be named readably on the SD picker
-CONFIG_FATFS_LFN_HEAP=y
+# Long filenames, but with the working buffer on the STACK rather than the
+# heap. LFN_HEAP mallocs and frees a buffer on EVERY filesystem operation, and
+# this device has two tasks touching the card during boot - the main task and
+# the boot-log writer - with FATFS file locking off. That is a great deal of
+# heap churn from more than one task, and the heap was arriving at ducky_lint
+# with a block header holding a size of -8. The stack buffer costs ~140 bytes
+# and removes the allocator from the filesystem path entirely.
+CONFIG_FATFS_LFN_STACK=y
 CONFIG_FATFS_MAX_LFN=64
 
 # --- scheduler tick -------------------------------------------------------
