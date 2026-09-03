@@ -35,6 +35,14 @@ static void copy_bounded(char *dst, size_t cap, const char *src)
 /* Consumer-control (media) usage codes, HID consumer page 0x0C. */
 static uint16_t media_usage(const char *n)
 {
+    /* Underscores are noise here. DuckyScript 3 writes VOLUME_UP and
+     * PLAY_PAUSE; older payloads write VOLUMEUP. They mean the same key, and
+     * rejecting one spelling failed the whole line as an unknown command. */
+    char t[28]; size_t o = 0;
+    for (const char *q = n; *q && o < sizeof(t) - 1; q++)
+        if (*q != '_' && *q != ' ') t[o++] = *q;
+    t[o] = 0;
+    n = t;
     if (kw(n,"PLAY")||kw(n,"PAUSE")||kw(n,"PLAYPAUSE")) return 0xCD;
     if (kw(n,"NEXT")) return 0xB5;
     if (kw(n,"PREV")||kw(n,"PREVIOUS")) return 0xB6;
@@ -456,6 +464,16 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         out[0].kind = DUCKY_MOUSE; out[0].wheel = clamp127(atoi(rest));
         out[0].mx = out[0].my = 0; out[0].buttons = 0; out[0].key = 0; out[0].mods = 0;
         return 1;
+    }
+    /* "MEDIA_VOLUME_UP" as a command in its own right - the form the official
+     * payloads use - as well as "MEDIA VOLUME_UP" with an argument. */
+    if (kw_prefix(cmd, "MEDIA_", 6)) {
+        uint16_t u = media_usage(cmd + 6);
+        if (u) {
+            memset(&out[0], 0, sizeof(out[0]));
+            out[0].kind = DUCKY_CONSUMER; out[0].consumer = u;
+            return 1;
+        }
     }
     if (kw(cmd, "MEDIA") || kw(cmd, "CONSUMER")) {
         uint16_t u = media_usage(rest);

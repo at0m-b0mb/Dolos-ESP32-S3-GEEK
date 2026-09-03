@@ -113,6 +113,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
     char tok[40];
     int problems = 0, kept = 0, lineno = 0;
     int in_block = 0;      /* inside STRING/STRINGLN ... END_STRING(LN) */
+    int block_line = 0;    /* where it was opened, for the error message      */
     bool any_cmd = false;                    /* has a repeatable command appeared? */
     bool in_rem = false;                     /* inside REM_BLOCK ... END_REM       */
 
@@ -188,7 +189,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
                 while (*after == ' ' || *after == '\t' || *after == '\r') after++;
                 if (*after == 0) opened = true;      /* "STRING" with no text */
             }
-            if (opened) { in_block = 1; any_cmd = true; continue; }
+            if (opened) { in_block = 1; block_line = lineno; any_cmd = true; continue; }
         }
 
         /* Control-flow and library constructs are handled by the interpreter,
@@ -318,6 +319,16 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
             continue;
         }
         any_cmd = true;
+    }
+    /* A STRING block that is never closed swallows the whole rest of the file
+     * as text to type - so a payload silently types its own source code
+     * instead of running it, and every line of it looks perfectly valid on its
+     * own. Nothing else in the linter can see that, because the mistake is the
+     * ABSENCE of a line. */
+    if (in_block) {
+        problems++;
+        add(out, max, &kept, block_line,
+            "STRING block is never closed - everything below it is typed as text");
     }
     return problems;
 }

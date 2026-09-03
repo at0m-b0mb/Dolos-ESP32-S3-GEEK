@@ -184,8 +184,15 @@ static void os_detect_apply(void)
         case USB_HOST_MAC:     want = OS_MAC;     break;
         default: return;                       /* not enough evidence yet */
     }
+    /* Log the first settled verdict as well as any later change: a verdict
+     * that merely agrees with the current setting is still the thing we want
+     * to see in the log when the answer turns out to be wrong. */
+    static bool logged;
+    if (!logged || want != s_cfg.os) {
+        logged = true;
+        ESP_LOGW(TAG, "host detected as %s (%s)", os_name(want), usb_hid_detect_why());
+    }
     if (want == s_cfg.os) return;
-    ESP_LOGW(TAG, "host detected as %s (%s)", os_name(want), usb_hid_detect_why());
     s_cfg.os = want;
     load_selected();      /* the linter judges typability against the OS */
 }

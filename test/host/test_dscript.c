@@ -385,4 +385,45 @@ TEST_MAIN_BEGIN
         CHECK(l && strstr(l, "$_") == NULL, "no variable NAME survives into the text");
         free(ds);
     }
+
+    SUITE("ELSE IF chains pick the branch that actually matches");
+    {
+        /* A false IF jumped to the line AFTER the next ELSE - which for
+         * "ELSE IF (...)" is its body - so the condition was never evaluated
+         * and every value past the second took the SECOND branch. */
+        static const char *want[6] = { NULL, "STRING A", "STRING B", "STRING C",
+                                       "STRING D", "STRING E" };
+        for (int k = 1; k <= 5; k++) {
+            char src[512];
+            snprintf(src, sizeof(src),
+                "VAR $k = %d\n"
+                "IF ($k == 1) THEN\n"   "STRING A\n"
+                "ELSE IF ($k == 2) THEN\n" "STRING B\n"
+                "ELSE IF ($k == 3) THEN\n" "STRING C\n"
+                "ELSE IF ($k == 4) THEN\n" "STRING D\n"
+                "ELSE\n"                "STRING E\n"
+                "END_IF\n", k);
+            dscript_t *ds = dscript_alloc();
+            CHECK(dscript_init(ds, src), "k=%d parses", k);
+            const char *l = dscript_next(ds);
+            CHECK(l && strcmp(l, want[k]) == 0,
+                  "k=%d takes %s, got %s", k, want[k], l ? l : "(nothing)");
+            CHECK(dscript_next(ds) == NULL, "k=%d runs exactly one branch", k);
+            free(ds);
+        }
+
+        /* the underscored spelling is in the keyword table and must work too */
+        const char *u =
+            "VAR $k = 3\n"
+            "IF ($k == 1) THEN\n"    "STRING A\n"
+            "ELSE_IF ($k == 3) THEN\n" "STRING C\n"
+            "ELSE\n"                 "STRING E\n"
+            "END_IF\n";
+        dscript_t *ds = dscript_alloc();
+        CHECK(dscript_init(ds, u), "ELSE_IF parses");
+        const char *l = dscript_next(ds);
+        CHECK(l && strcmp(l, "STRING C") == 0,
+              "ELSE_IF picks the matching branch, got %s", l ? l : "(nothing)");
+        free(ds);
+    }
 TEST_MAIN_END

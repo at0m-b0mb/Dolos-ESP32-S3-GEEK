@@ -19,7 +19,7 @@ STRINGLN ################ DOLOS MASTER TEST ################
 REM ==========================================================
 REM  SECTION A - HOST AND ENVIRONMENT
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- A. HOST AND ENVIRONMENT ---
 STRINGLN detected OS code (0=win 1=linux 2=mac) -> $_OS
 STRINGLN caps lock now   -> $_CAPSLOCK_ON
@@ -36,7 +36,7 @@ END_IF
 REM ==========================================================
 REM  SECTION B - VARIABLES AND ARITHMETIC
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- B. VARIABLES AND ARITHMETIC ---
 VAR $a = 12
 VAR $b = 5
@@ -79,7 +79,7 @@ STRINGLN self-assignment.           expect 42       got $c
 REM ==========================================================
 REM  SECTION C - COMPARISONS
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- C. COMPARISONS ---
 VAR $c = $a > $b
 STRINGLN greater.                       expect 1 got $c
@@ -101,7 +101,7 @@ STRINGLN boundary, or-equal.            expect 1 got $c
 REM ==========================================================
 REM  SECTION D - CONTROL FLOW
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- D. CONTROL FLOW ---
 VAR $t = 0
 IF ($a > $b) THEN
@@ -161,7 +161,7 @@ STRINGLN if inside while.           expect 99  got $d
 REM ==========================================================
 REM  SECTION E - FUNCTIONS
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- E. FUNCTIONS ---
 VAR $calls = 0
 FUNCTION bump()
@@ -188,7 +188,7 @@ STRINGLN calls from a loop.         expect 7   got $calls
 REM ==========================================================
 REM  SECTION F - DEFINES
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- F. DEFINES ---
 DEFINE #GREETING hello-from-a-define
 DEFINE #NUMBER 4242
@@ -200,7 +200,7 @@ STRINGLN define of a define -> #NESTED
 REM ==========================================================
 REM  SECTION G - STRING BLOCKS
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- G. STRING BLOCKS ---
 STRINGLN the next four lines must be separate:
 STRINGLN_BLOCK
@@ -215,14 +215,14 @@ joined-A
 joined-B
 joined-C
 END_STRING
-STRINGLN
+ENTER
 STRINGLN punctuation: <>{}[]()|/~^%@!&*+=_-:;,.?
 STRINGLN quotes: "double" and 'single' and `backtick`
 
 REM ==========================================================
 REM  SECTION H - LONG STRINGS (continuation across the action buffer)
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- H. LONG STRINGS (continuation across the action buffer) ---
 REM  The action buffer holds 192 entries. Anything longer must be
 REM  continued, not silently cut off. Each line ends in _END.
@@ -242,7 +242,7 @@ STRINGLN   ^ 500 digits, repeating 0123456789, then _END
 REM ==========================================================
 REM  SECTION I - KEYS AND EDITING
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- I. KEYS AND EDITING ---
 SHIFT a
 SHIFT b
@@ -284,7 +284,7 @@ STRINGLN after-tab  <- expect a tab between them
 REM ==========================================================
 REM  SECTION J - HOLD AND RELEASE
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- J. HOLD AND RELEASE ---
 HOLD SHIFT
 STRING held-shift
@@ -299,7 +299,7 @@ STRINGLN after  <- expect beforeMIDDLEafter with only the middle shifted
 REM ==========================================================
 REM  SECTION K - TIMING AND REPEAT
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- K. TIMING AND REPEAT ---
 STRINGLN five 400ms delays follow, about 2 seconds:
 DELAY 400
@@ -319,7 +319,7 @@ REPEAT 7
 STRINGLN ^ that block should show 8 identical lines
 STRINGLN REPEAT with an argument, expect 6 dashes:
 REPEAT 6 STRING -
-STRINGLN
+ENTER
 STRINGDELAY 20
 STRINGLN this line types with a 20ms gap per character
 STRINGDELAY 0
@@ -329,7 +329,7 @@ STRINGLN default delay lowered to 5ms for the rest
 REM ==========================================================
 REM  SECTION L - RANDOM GENERATORS
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- L. RANDOM GENERATORS ---
 VAR $_RANDOM_MIN = 10
 VAR $_RANDOM_MAX = 99
@@ -350,26 +350,26 @@ RANDOM_LOWERCASE_LETTER
 RANDOM_LOWERCASE_LETTER
 RANDOM_LOWERCASE_LETTER
 RANDOM_LOWERCASE_LETTER
-STRINGLN
+ENTER
 STRING random uppercase: 
 RANDOM_UPPERCASE_LETTER
 RANDOM_UPPERCASE_LETTER
 RANDOM_UPPERCASE_LETTER
 RANDOM_UPPERCASE_LETTER
 RANDOM_UPPERCASE_LETTER
-STRINGLN
+ENTER
 STRING random digits:    
 RANDOM_NUMBER
 RANDOM_NUMBER
 RANDOM_NUMBER
 RANDOM_NUMBER
 RANDOM_NUMBER
-STRINGLN
+ENTER
 
 REM ==========================================================
 REM  SECTION M - INTERNATIONAL TEXT
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- M. INTERNATIONAL TEXT ---
 STRINGLN ascii baseline. the quick brown fox 0123456789
 STRINGLN ascii fallback. Gruesse aus Muenchen, Voila, Manana
@@ -388,7 +388,7 @@ STRINGLN  <- expect e-acute then u-umlaut before this arrow
 REM ==========================================================
 REM  SECTION N - MOUSE AND MEDIA
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- N. MOUSE AND MEDIA ---
 STRINGLN watch the pointer trace a square and return (no clicks)
 MOUSEMOVE 15 0
@@ -433,7 +433,7 @@ STRINGLN volume returned
 REM ==========================================================
 REM  SECTION O - EDGE CASES AND LITERALS
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN --- O. EDGE CASES AND LITERALS ---
 REM this comment must not appear
 REM: punctuated remark must not appear
@@ -451,7 +451,7 @@ VAR $neg = 0 - 17
 STRINGLN negative literal.          expect -17 got $neg
 VAR $Odd_Name_123 = 123
 STRINGLN unusual variable name.     expect 123 got $Odd_Name_123
-STRINGLN
+ENTER
 STRINGLN   ^ that was an empty STRINGLN, expect one blank line
 STRINGLN trailing spaces after this arrow ->   
 STRINGLN a line with a single character:
@@ -460,14 +460,14 @@ STRINGLN x
 REM ==========================================================
 REM  SUMMARY
 REM ==========================================================
-STRINGLN
+ENTER
 STRINGLN ################ MASTER TEST COMPLETE ################
 STRINGLN If every 'expect' matched its 'got', the engine is sound.
 STRINGLN Sections: A host, B arithmetic, C comparisons, D flow,
 STRINGLN E functions, F defines, G blocks, H long strings,
 STRINGLN I keys, J hold, K timing, L randoms, M international,
 STRINGLN N mouse, O edge cases.
-STRINGLN
+ENTER
 STRINGLN The lock-key test is NOT included: it blocks waiting for
 STRINGLN a key press and would stall this run. Use TB_LOCKKEYS.TXT.
 STOP_PAYLOAD

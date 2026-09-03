@@ -154,4 +154,34 @@ TEST_MAIN_BEGIN
         CHECK(lint("DEFIN #NAME example\n", e, LAYOUT_US, OS_WINDOWS) == 1,
               "a genuine typo is still reported");
     }
+
+    SUITE("lint: a STRING block that is never closed is an error");
+    {
+        ducky_lint_t pr[4];
+        /* A bare STRINGLN opens a block. Without END_STRINGLN the rest of the
+         * payload is typed as literal text - the script types its own source. */
+        const char *bad =
+            "STRINGLN hello\n"
+            "STRINGLN\n"                 /* opens a block */
+            "VAR $a = 1\n"
+            "STRINGLN $a\n";
+        int n = ducky_lint(bad, LAYOUT_US, OS_WINDOWS, pr, 4);
+        CHECK(n >= 1, "the unclosed block is reported (%d problem(s))", n);
+        CHECK(n >= 1 && pr[0].line == 2, "and points at the line that opened it, got %d",
+              n >= 1 ? pr[0].line : -1);
+
+        const char *good =
+            "STRINGLN hello\n"
+            "STRINGLN\n"
+            "typed as text\n"
+            "END_STRINGLN\n"
+            "VAR $a = 1\n";
+        CHECK(ducky_lint(good, LAYOUT_US, OS_WINDOWS, pr, 4) == 0,
+              "a properly closed block is fine");
+
+        /* ENTER is the right way to get a blank line, and must stay clean */
+        const char *blank = "STRINGLN one\nENTER\nSTRINGLN two\n";
+        CHECK(ducky_lint(blank, LAYOUT_US, OS_WINDOWS, pr, 4) == 0,
+              "ENTER for a blank line lints clean");
+    }
 TEST_MAIN_END

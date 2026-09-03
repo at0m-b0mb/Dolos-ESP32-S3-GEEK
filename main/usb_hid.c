@@ -115,17 +115,23 @@ usb_host_os_t usb_hid_detect_os(void)
         snprintf(s_detect_why, sizeof(s_detect_why), "still listening (%ums)", (unsigned)since);
         return USB_HOST_UNKNOWN;          /* too early to call it a Mac */
     }
+    /* The raw signals go into the message verbatim. These heuristics are not a
+     * standard and the only way to improve them is to see what real machines
+     * actually do, so the evidence is always reported beside the verdict. */
+    char ev[64];
+    snprintf(ev, sizeof(ev), "led=%d proto=%d getrep=%u desc=%u t=%ums",
+             s_led_report_seen ? 1 : 0, s_set_protocol_seen ? 1 : 0,
+             (unsigned)s_get_report_reqs, (unsigned)s_report_desc_reqs,
+             (unsigned)since);
     if (!s_led_report_seen) {
-        snprintf(s_detect_why, sizeof(s_detect_why),
-                 "no lock-LED report in %ums%s", (unsigned)since,
-                 s_get_report_reqs ? ", host read the report over control" : "");
+        snprintf(s_detect_why, sizeof(s_detect_why), "no LED report; %s", ev);
         return USB_HOST_MAC;
     }
     if (s_set_protocol_seen) {
-        snprintf(s_detect_why, sizeof(s_detect_why), "LED report + SET_PROTOCOL");
+        snprintf(s_detect_why, sizeof(s_detect_why), "LED+SET_PROTOCOL; %s", ev);
         return USB_HOST_LINUX;
     }
-    snprintf(s_detect_why, sizeof(s_detect_why), "LED report, no SET_PROTOCOL");
+    snprintf(s_detect_why, sizeof(s_detect_why), "LED, no SET_PROTOCOL; %s", ev);
     return USB_HOST_WINDOWS;
 }
 

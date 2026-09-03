@@ -344,6 +344,29 @@ static int32_t eval(dscript_t *ds, const char *expr)
  * Skipping a block means finding the matching terminator at the SAME nesting
  * depth: an IF inside an IF must not close the outer one.
  */
+/* Every spelling of the else half of a conditional.
+ *
+ * starts_with_kw() requires a delimiter after the keyword, and '_' is not one,
+ * so "ELSE_IF" never matched "ELSE" - match_end() could not find it and the
+ * ELSE handler did not recognise it either. Both spellings are in the keyword
+ * table, so both have to work. */
+static bool is_else_line(const char *l)
+{
+    if (starts_with_kw(l, "ELSE_IF")) return true;
+    return starts_with_kw(l, "ELSE");
+}
+
+/* ...and the tail of an "ELSE IF <cond>" line, or NULL if it is a plain ELSE. */
+static const char *else_if_cond(const char *l)
+{
+    if (starts_with_kw(l, "ELSE_IF")) return skip_ws(l + 7);
+    if (starts_with_kw(l, "ELSE")) {
+        const char *a = skip_ws(l + 4);
+        if (starts_with_kw(a, "IF")) return skip_ws(a + 2);
+    }
+    return NULL;
+}
+
 static uint16_t match_end(dscript_t *ds, uint16_t from,
                           const char *open_kw, const char *close_kw,
                           const char *else_kw, bool stop_at_else)
@@ -355,7 +378,9 @@ static uint16_t match_end(dscript_t *ds, uint16_t from,
         const char *l = skip_ws(buf);
         if (starts_with_kw(l, open_kw))  { depth++; continue; }
         if (starts_with_kw(l, close_kw)) { if (depth == 0) return i; depth--; continue; }
-        if (stop_at_else && depth == 0 && else_kw && starts_with_kw(l, else_kw)) return i;
+        if (stop_at_else && depth == 0 && else_kw &&
+            (else_kw[0] == 'E' && else_kw[1] == 'L' ? is_else_line(l)
+                                                    : starts_with_kw(l, else_kw))) return i;
     }
     return 0xFFFF;
 }
@@ -823,15 +848,36 @@ const char *dscript_next(dscript_t *ds)
             if (then) *then = 0;
             int32_t v = eval(ds, c);
             if (ds->err) return NULL;
-            if (!v) {
-                uint16_t j = match_end(ds, here, "IF", "END_IF", "ELSE", true);
+            /* Walk the ELSE IF chain.
+             *
+             * A false condition jumped to the line AFTER the next ELSE - and
+             * for "ELSE IF (...)" that line is its BODY. The condition was
+             * never evaluated, so the branch ran unconditionally and every
+             * value past the second one took the second branch. Land ON each
+             * ELSE IF and actually test it. */
+            uint16_t at = here;
+            while (!v) {
+                uint16_t j = match_end(ds, at, "IF", "END_IF", "ELSE", true);
                 if (j == 0xFFFF) { fail(ds, "IF without END_IF"); return NULL; }
-                get_line(ds, j, buf, sizeof(buf));
-                ds->pc = (uint16_t)(j + 1);      /* land after ELSE or END_IF */
+                get_line(ds, j, buf, DS_LINE_MAX)   /* buf is a POINTER: sizeof is 8 */;
+                const char *cond2 = else_if_cond(skip_ws(buf));
+                if (!cond2) {                    /* a plain ELSE, or END_IF */
+                    ds->pc = (uint16_t)(j + 1);
+                    break;
+                }
+                char c2[DS_LINE_MAX];
+                snprintf(c2, sizeof(c2), "%s", cond2);
+                char *t2 = strstr(c2, "THEN");
+                if (!t2) t2 = strstr(c2, "then");
+                if (t2) *t2 = 0;
+                v = eval(ds, c2);
+                if (ds->err) return NULL;
+                at = j;
+                if (v) ds->pc = (uint16_t)(j + 1);   /* this branch is taken */
             }
             continue;
         }
-        if (starts_with_kw(l, "ELSE")) {
+        if (is_else_line(l)) {
             /* reached only by falling out of a taken IF branch: skip the else */
             uint16_t j = match_end(ds, here, "IF", "END_IF", NULL, false);
             if (j == 0xFFFF) { fail(ds, "ELSE without END_IF"); return NULL; }

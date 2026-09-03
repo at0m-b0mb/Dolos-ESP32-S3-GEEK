@@ -342,4 +342,26 @@ TEST_MAIN_BEGIN
         }
         CHECK(enters == 1, "exactly one ENTER, at the very end (got %d)", enters);
     }
+
+    SUITE("media keys accept the spellings payloads actually use");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        ducky_action_t a[8];
+        /* DuckyScript 3 writes the underscored form; it was rejected outright. */
+        CHECK(ducky_parse_line(&st, "MEDIA VOLUME_UP", a, 8) == 1 &&
+              a[0].kind == DUCKY_CONSUMER && a[0].consumer == 0xE9, "MEDIA VOLUME_UP");
+        CHECK(ducky_parse_line(&st, "MEDIA VOLUME_DOWN", a, 8) == 1 &&
+              a[0].consumer == 0xEA, "MEDIA VOLUME_DOWN");
+        CHECK(ducky_parse_line(&st, "MEDIA PLAY_PAUSE", a, 8) == 1 &&
+              a[0].consumer == 0xCD, "MEDIA PLAY_PAUSE");
+        /* the old spellings must keep working */
+        CHECK(ducky_parse_line(&st, "MEDIA VOLUMEUP", a, 8) == 1 &&
+              a[0].consumer == 0xE9, "MEDIA VOLUMEUP still works");
+        /* and the standalone command form */
+        CHECK(ducky_parse_line(&st, "MEDIA_VOLUME_UP", a, 8) == 1 &&
+              a[0].kind == DUCKY_CONSUMER && a[0].consumer == 0xE9, "MEDIA_VOLUME_UP alone");
+        CHECK(ducky_parse_line(&st, "MEDIA_MUTE", a, 8) == 1 &&
+              a[0].consumer == 0xE2, "MEDIA_MUTE alone");
+        CHECK(ducky_parse_line(&st, "MEDIA BANANA", a, 8) == 0, "an unknown media key is still rejected");
+    }
 TEST_MAIN_END
