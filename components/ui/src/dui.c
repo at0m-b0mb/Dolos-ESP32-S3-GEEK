@@ -207,30 +207,65 @@ static void draw_info(canvas_t *cv, const dui_state_t *st)
         return;
     }
 
-    /* WIFI:T:WPA;S:<ssid>;P:<key>;; - the join URI phone cameras recognise */
-    char uri[128];
-    snprintf(uri, sizeof(uri), "WIFI:T:WPA;S:%s;P:%s;;",
-             st->wifi_ssid ? st->wifi_ssid : "", st->wifi_key ? st->wifi_key : "");
+    /* WIFI:T:WPA;S:<ssid>;P:<key>;; - the join URI phone cameras recognise.
+     *
+     * The separators have to be escaped inside the values, or an SSID or key
+     * containing ';' ':' ',' '"' or '\\' produces a URI that says something
+     * else entirely - and a QR that joins the wrong network, or nothing. */
+    char uri[256];
+    {
+        size_t o = 0;
+        const char *pre = "WIFI:T:WPA;S:";
+        for (const char *q = pre; *q && o < sizeof(uri) - 1; q++) uri[o++] = *q;
+        for (int part = 0; part < 2; part++) {
+            const char *v = part ? (st->wifi_key ? st->wifi_key : "")
+                                 : (st->wifi_ssid ? st->wifi_ssid : "");
+            for (; *v && o < sizeof(uri) - 3; v++) {
+                if (*v == '\\' || *v == ';' || *v == ',' || *v == ':' || *v == '"')
+                    uri[o++] = '\\';
+                uri[o++] = *v;
+            }
+            if (!part) { const char *mid = ";P:";
+                         for (const char *q = mid; *q && o < sizeof(uri) - 1; q++) uri[o++] = *q; }
+        }
+        for (const char *q = ";;"; *q && o < sizeof(uri) - 1; q++) uri[o++] = *q;
+        uri[o] = 0;
+    }
 
     static uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
     static uint8_t tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(6)];
     bool ok = qrcodegen_encodeText(uri, tmp, qr, qrcodegen_Ecc_LOW,
                                    1, 6, qrcodegen_Mask_AUTO, true);
-    int qx = 6, qy = 20;
+    /* Between the header band (15px) and the footer rule (H-12): text drawn on
+     * top of a QR's quiet zone breaks it just as surely as no quiet zone. */
+    int qx = 3, qy = 17;
+    int block = (H - 12) - qy - 1;
     if (ok) {
         int n = qrcodegen_getSize(qr);
-        int avail = H - 12 - qy - 2;               /* above the footer */
-        int scale = avail / (n + 2);               /* +2 = quiet zone  */
+        /* Make the MODULES as large as the screen allows, then spend whatever
+         * is left on the quiet zone.
+         *
+         * It used to reserve exactly one module of quiet and fit the rest into
+         * a short column above the footer, which on a long SSID came out at two
+         * pixels per module. Two pixels on a 1.14" panel is not something a
+         * phone camera can resolve, and one module of quiet is under the four
+         * the spec asks for - so it often would not scan at all. */
+        int scale = block / (n + 3);
         if (scale < 1) scale = 1;
-        int side = (n + 2) * scale;
-        /* A QR needs a light quiet zone to scan: draw the whole block white. */
-        cv_fill_rect(cv, qx, qy, side, side, cv_rgb(255, 255, 255));
+        int side = n * scale;
+        int pad  = (block - side) / 2;             /* the quiet zone, centred */
+        cv_fill_rect(cv, qx, qy, block, block, cv_rgb(255, 255, 255));
         for (int y = 0; y < n; y++)
             for (int x = 0; x < n; x++)
                 if (qrcodegen_getModule(qr, x, y))
-                    cv_fill_rect(cv, qx + (x + 1) * scale, qy + (y + 1) * scale,
+                    cv_fill_rect(cv, qx + pad + x * scale, qy + pad + y * scale,
                                  scale, scale, cv_rgb(0, 0, 0));
-        qx += side + 6;
+        qx += block + 6;
+    } else {
+        /* Never leave a blank space where a QR should be: say what happened. */
+        cv_text(cv, qx, qy + 30, "CREDENTIALS TOO LONG", DU_ARMED, -1, 1);
+        cv_text(cv, qx, qy + 44, "FOR A QR - TYPE THEM", DU_DIM, -1, 1);
+        qx += 130;
     }
 
     /* Credentials as large as they will go without spilling out of the column
