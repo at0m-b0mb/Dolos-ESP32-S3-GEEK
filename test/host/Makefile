@@ -9,6 +9,16 @@ SUITES := test_sbuf test_dscript test_keymap test_ducky test_dui test_layout tes
 
 .PHONY: all clean portability
 
+# The default goal is the FIRST normal target in the file, and .PHONY is not
+# one - so for a while a bare "make" ran only the portability check below and
+# exited 0 without executing a single test. Both CI workflows invoke it that
+# way, which means the whole suite was green because nothing ran. Say it
+# outright rather than depending on where a rule happens to sit in the file.
+.DEFAULT_GOAL := all
+
+all: portability $(SUITES:%=run-%)
+	@printf '\nAll %d suites passed.\n' $(words $(SUITES))
+
 # POSIX functions that macOS declares unconditionally and glibc hides under
 # -std=c11. Twice now one of these has compiled cleanly here and failed on the
 # Linux runner, so the portable sources are checked before anything is built.
@@ -27,8 +37,6 @@ portability:
 	if [ $$bad -ne 0 ]; then echo "portability check FAILED"; exit 1; fi; \
 	echo "portability: portable sources use ISO C only"
 
-all: portability $(SUITES:%=run-%)
-	@echo "\nAll suites passed."
 run-%: $(BIN)/%
 	@echo "--- $< ---"; $<
 $(BIN)/test_keymap:  test_keymap.c  $(DSRC) | $(BIN)
