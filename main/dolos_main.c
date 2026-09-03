@@ -913,9 +913,32 @@ static void ui_task(void *arg)
  * device may not even have. So a crash is counted in NVS, and after two in a
  * row the next boot skips the optional subsystems and says SAFE BOOT on screen.
  * A successful run clears the count (see boot_guard_ok). */
+/* Why the chip restarted, in words. A panic writes a core dump and a backtrace;
+ * a brownout or a hardware watchdog writes NOTHING, so those two look exactly
+ * like a device that "just restarted" with no evidence anywhere. Naming the
+ * reason is the difference between debugging and guessing. */
+static const char *reset_reason_name(esp_reset_reason_t r)
+{
+    switch (r) {
+        case ESP_RST_POWERON:  return "power-on";
+        case ESP_RST_EXT:      return "external reset";
+        case ESP_RST_SW:       return "software restart";
+        case ESP_RST_PANIC:    return "PANIC (core dump written)";
+        case ESP_RST_INT_WDT:  return "interrupt watchdog";
+        case ESP_RST_TASK_WDT: return "task watchdog";
+        case ESP_RST_WDT:      return "other watchdog";
+        case ESP_RST_DEEPSLEEP:return "deep sleep";
+        case ESP_RST_BROWNOUT: return "BROWNOUT (supply dipped)";
+        case ESP_RST_SDIO:     return "SDIO";
+        default:               return "unknown";
+    }
+}
+const char *g_reset_reason = "";
+
 static void boot_guard_begin(void)
 {
     esp_reset_reason_t r = esp_reset_reason();
+    g_reset_reason = reset_reason_name(r);
     bool crashed = (r == ESP_RST_PANIC || r == ESP_RST_TASK_WDT ||
                     r == ESP_RST_INT_WDT || r == ESP_RST_WDT);
     uint8_t count = 0;
@@ -1114,6 +1137,20 @@ void app_main(void)
             if (n > 0) { cbuf[n] = 0; config_parse(cbuf, &s_cfg); }
         }
         scan_payloads();
+    }
+    /* One line per boot, always. This is deliberately NOT the opt-in boot log:
+     * it is three facts that cost nothing and answer "what happened last time",
+     * which neither the screen nor the serial port can tell us once TinyUSB
+     * owns the USB pins. */
+    if (s_sd_ok) {
+        FILE *bf = fopen("/sdcard/DOLOS_BOOT.LOG", "a");
+        if (bf) {
+            fprintf(bf, "boot: reason=%s crashes=%u safe=%d internal_free=%u largest=%u\n",
+                    g_reset_reason, (unsigned)g_crashes, g_safe_boot ? 1 : 0,
+                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+            fclose(bf);
+        }
     }
     bootlog_open();
     /* Work out which partition could be shared, but do not share it: nothing is

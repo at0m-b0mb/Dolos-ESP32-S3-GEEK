@@ -327,6 +327,13 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
      * Static is safe here: the state machine runs exactly one payload at a
      * time, and only ever from the payload task. */
     static ducky_action_t acts[192];
+    /* Start from a known keyboard state.
+     *
+     * HOLD keeps a key down until RELEASE, and a run that is aborted (or ends
+     * mid-HOLD) leaves it down. The next run would then send that key inside
+     * every report - the host sees it held, starts auto-repeating it, and the
+     * text arrives shuffled. Nothing reset it between runs. */
+    if (!ctx->dry_run) usb_hid_release();
     s_fail[0] = 0;
     g_ilog_idx = 0; g_ilog_line = 0;
     uint32_t drops_before = usb_hid_drops();
