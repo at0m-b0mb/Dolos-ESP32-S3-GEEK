@@ -3,159 +3,196 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Dolos Console</title>
 <style>
-/* ── tokens ──────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────
+   Dolos console. Light by default, dark on request, and "auto" follows the
+   phone. Every colour is a token, so a theme is a variable swap and nothing
+   below this block needs to know which one is active.
+   ───────────────────────────────────────────────────────────────────────── */
 :root{
-  --bg:#0b0710; --surface:#160d16; --surface2:#1e131e; --rim:#33202e; --rim2:#452b3c;
-  --ink:#f3ecf2; --dim:#b39dae; --faint:#7a6472;
-  --brand:#e6465a; --brand2:#ff6274; --brandDim:#7d2233;
-  --ok:#3ddc84; --warn:#f5b53c; --danger:#ff5566; --info:#63a6ff;
-  --r:14px; --rs:10px; --pad:16px;
-  --shadow:0 8px 28px rgba(0,0,0,.45);
+  --bg:#f6f7f9; --panel:#ffffff; --panel2:#fbfbfd; --rim:#e4e6ec; --rim2:#d3d7e0;
+  --ink:#12141a; --dim:#5d6478; --faint:#8b91a3;
+  --brand:#d22c43; --brandInk:#ffffff; --brandSoft:#fdeef0;
+  --ok:#0f9d58; --okSoft:#e8f6ee; --warn:#b3730a; --warnSoft:#fdf3e2;
+  --danger:#c8202f; --dangerSoft:#fdecee; --info:#1a63c7; --infoSoft:#eaf1fd;
+  --shadow:0 1px 2px rgba(18,20,26,.05), 0 8px 24px rgba(18,20,26,.06);
+  --shadowUp:0 -6px 20px rgba(18,20,26,.08);
+  --r:14px; --rs:10px; --pad:18px;
+}
+html[data-theme="dark"]{
+  --bg:#0d0f14; --panel:#161922; --panel2:#1b1f29; --rim:#262b37; --rim2:#333a4a;
+  --ink:#eceef4; --dim:#a3abbf; --faint:#7b8399;
+  --brand:#f2566c; --brandInk:#1a0308; --brandSoft:#2a1219;
+  --ok:#3ddc84; --okSoft:#12281c; --warn:#f0b23c; --warnSoft:#2b2110;
+  --danger:#ff6072; --dangerSoft:#2c1116; --info:#6aa6ff; --infoSoft:#111d33;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.35);
+  --shadowUp:0 -6px 20px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box;min-width:0}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 html,body{margin:0;height:100%;max-width:100%;overflow-x:hidden}
-body{
-  background:radial-gradient(120% 80% at 50% -20%,#3a1220 0%,#1a0d16 45%,var(--bg) 100%) fixed;
-  color:var(--ink);
-  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-}
-h1,h2,h3{margin:0}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+body{background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  transition:background .2s,color .2s}
+h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.01em}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 
-/* ── controls ────────────────────────────────────────────────────────── */
-button{
-  font:inherit;font-weight:600;cursor:pointer;border:0;border-radius:var(--rs);
-  padding:.7em 1.1em;min-height:44px;
-  background:linear-gradient(180deg,var(--brand),#b52640);color:#fff;
-  transition:transform .06s,filter .15s,opacity .15s;
-}
-button:hover{filter:brightness(1.08)} button:active{transform:translateY(1px)}
-button:disabled{opacity:.38;cursor:not-allowed;transform:none;filter:none}
-button:focus-visible{outline:2px solid var(--brand2);outline-offset:2px}
-.b-ghost{background:#2a1826;color:var(--ink);border:1px solid var(--rim2)}
-.b-quiet{background:transparent;color:var(--dim);border:1px solid var(--rim);min-height:38px;padding:.45em .85em}
-.b-danger{background:linear-gradient(180deg,var(--danger),#a02233)}
-.b-warn{background:linear-gradient(180deg,var(--warn),#b9820f);color:#241800}
-.b-sm{min-height:36px;padding:.35em .8em;font-size:.86rem}
+/* controls */
+button{font:inherit;font-weight:600;cursor:pointer;border:1px solid transparent;border-radius:var(--rs);
+  padding:.62em 1.05em;min-height:42px;background:var(--brand);color:var(--brandInk);
+  transition:filter .15s,transform .06s,background .15s,border-color .15s;
+  /* A label must never escape its button. Long words break, the box grows
+     downward instead of sideways, and it can shrink inside a flex row. */
+  max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;
+  line-height:1.25;display:inline-flex;align-items:center;justify-content:center;
+  text-align:center;height:auto}
+button:hover{filter:brightness(1.06)} button:active{transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none}
+button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.b-ghost{background:var(--panel);color:var(--ink);border-color:var(--rim2)}
+.b-ghost:hover{background:var(--panel2)}
+.b-quiet{background:transparent;color:var(--dim);border-color:var(--rim2);min-height:36px;padding:.4em .8em;font-size:.87rem}
+.b-danger{background:var(--danger);color:#fff}
+.b-warn{background:var(--warn);color:#fff}
+.b-sm{min-height:34px;padding:.32em .75em;font-size:.85rem}
 
-input,textarea,select{
-  font:inherit;width:100%;color:var(--ink);background:#120a12;
-  border:1px solid var(--rim2);border-radius:var(--rs);padding:.62em .75em;
-  transition:border-color .15s,box-shadow .15s;
-}
-input:focus,textarea:focus,select:focus{
-  outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(230,70,90,.16);
-}
-textarea{resize:vertical;min-height:200px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
-label.lbl{display:block;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--faint);margin:0 0 .4em;font-weight:600}
+input,textarea,select{font:inherit;width:100%;color:var(--ink);background:var(--panel);
+  border:1px solid var(--rim2);border-radius:var(--rs);padding:.6em .75em;
+  transition:border-color .15s,box-shadow .15s}
+input:focus,textarea:focus,select:focus{outline:0;border-color:var(--brand);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 18%,transparent)}
+textarea{resize:vertical;min-height:200px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;
+  background:var(--panel2)}
+label.lbl{display:block;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--faint);margin:0 0 .4em;font-weight:650}
 
-.sw{position:relative;width:50px;height:29px;flex:0 0 auto;border-radius:999px;
-  background:#2a1622;border:1px solid var(--rim2);cursor:pointer;transition:background .15s}
-.sw::after{content:"";position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;
-  background:var(--faint);transition:transform .16s,background .16s}
-.sw.on{background:linear-gradient(180deg,var(--brand),#b52640);border-color:transparent}
-.sw.on::after{transform:translateX(21px);background:#fff}
+.sw{position:relative;width:48px;height:28px;flex:0 0 auto;border-radius:999px;cursor:pointer;
+  background:var(--rim2);border:1px solid var(--rim2);transition:background .16s,border-color .16s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .17s}
+.sw.on{background:var(--brand);border-color:var(--brand)}
+.sw.on::after{transform:translateX(20px)}
 
-/* ── login ───────────────────────────────────────────────────────────── */
-#login{min-height:100dvh;display:grid;place-items:center;padding:24px}
-.loginCard{width:100%;max-width:370px;background:linear-gradient(180deg,var(--surface2),var(--surface));
-  border:1px solid var(--rim);border-radius:20px;padding:32px 26px;box-shadow:var(--shadow)}
-.brandRow{display:flex;align-items:center;gap:12px;justify-content:center}
-.mark{width:44px;height:32px;border-radius:8px;flex:0 0 auto;position:relative;
-  background:linear-gradient(180deg,#ff5c72,#b52640)}
-.mark::before{content:"";position:absolute;inset:7px 6px;border-radius:3px;
-  background:radial-gradient(circle at 6px 5px,#170811 1.5px,transparent 1.6px) 0 0/9px 8px}
-.wordmark{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.18em;font-size:1.6rem}
-.sub{text-align:center;color:var(--dim);font-size:.74rem;letter-spacing:.16em;
-  text-transform:uppercase;margin:.5em 0 24px}
+/* login */
+#login{min-height:100dvh;display:grid;place-items:center;padding:24px;
+  background:radial-gradient(90% 60% at 50% 0%,color-mix(in srgb,var(--brand) 8%,var(--bg)) 0%,var(--bg) 70%)}
+.loginCard{width:100%;max-width:364px;background:var(--panel);border:1px solid var(--rim);
+  border-radius:18px;padding:34px 28px;box-shadow:var(--shadow)}
+.brandRow{display:flex;align-items:center;gap:11px;justify-content:center}
+.mark{width:38px;height:28px;border-radius:7px;flex:0 0 auto;position:relative;background:var(--brand)}
+.mark::before{content:"";position:absolute;inset:6px 5px;border-radius:2px;
+  background:radial-gradient(circle at 5px 4px,rgba(255,255,255,.92) 1.4px,transparent 1.5px) 0 0/8px 7px}
+.wordmark{font-weight:700;letter-spacing:.2em;font-size:1.32rem}
+.sub{text-align:center;color:var(--faint);font-size:.72rem;letter-spacing:.14em;
+  text-transform:uppercase;margin:.55em 0 26px;font-weight:600}
 .field{margin-bottom:14px}
-.err{color:var(--danger);font-size:.86rem;min-height:1.2em;margin-top:6px;text-align:center}
-.legal{color:var(--faint);font-size:.72rem;text-align:center;margin-top:18px;line-height:1.6}
+.err{color:var(--danger);font-size:.86rem;min-height:1.2em;margin-top:7px;text-align:center}
+.legal{color:var(--faint);font-size:.73rem;text-align:center;margin-top:20px;line-height:1.6}
 
-/* ── shell ───────────────────────────────────────────────────────────── */
-#app{display:none;max-width:900px;margin:0 auto;padding:0 var(--pad) 90px}
-.topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;padding:12px 0 10px;
-  background:linear-gradient(180deg,#150c14 72%,rgba(21,12,20,0));backdrop-filter:blur(10px)}
-.topbar .mark{width:30px;height:23px}
-.topbar .wordmark{font-size:1.05rem}
+/* shell */
+#app{display:none;max-width:880px;margin:0 auto;padding:0 var(--pad) 96px}
+.topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;
+  padding:13px 0 11px;background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:saturate(1.6) blur(12px);border-bottom:1px solid var(--rim)}
+.topbar .mark{width:26px;height:20px}
+.topbar .wordmark{font-size:1rem}
 .grow{flex:1}
-.chip{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
-  padding:.32em .7em;border-radius:999px;border:1px solid var(--rim2);color:var(--dim);background:#241019}
-.chip.admin{color:var(--brand2);border-color:var(--brandDim)}
+.chip{font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;font-weight:700;
+  padding:.3em .65em;border-radius:999px;border:1px solid var(--rim2);color:var(--dim);background:var(--panel2)}
+.chip.admin{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 40%,transparent);
+  background:var(--brandSoft)}
+.seg{display:inline-flex;border:1px solid var(--rim2);border-radius:999px;overflow:hidden;flex:0 0 auto}
+.seg button{min-height:30px;padding:.2em .62em;font-size:.76rem;font-weight:600;border:0;border-radius:0;
+  background:transparent;color:var(--dim);letter-spacing:.02em}
+.seg button:hover{background:var(--panel2);color:var(--ink)}
+.seg button.on{background:var(--brand);color:var(--brandInk)}
+.iconbtn{min-height:34px;width:34px;padding:0;display:grid;place-items:center;font-size:1rem;
+  background:transparent;color:var(--dim);border-color:var(--rim2)}
 
-.nav{display:flex;gap:6px;overflow-x:auto;padding:0 0 12px;scrollbar-width:none}
+.nav{display:flex;gap:6px;overflow-x:auto;padding:12px 0;scrollbar-width:none}
 .nav::-webkit-scrollbar{display:none}
-.nav button{background:#1d1220;border:1px solid var(--rim);color:var(--dim);font-weight:600;
-  min-height:38px;padding:.4em .95em;font-size:.9rem;white-space:nowrap}
-.nav button.on{background:linear-gradient(180deg,var(--brand),#b52640);color:#fff;border-color:transparent}
+.nav button{background:transparent;border-color:transparent;color:var(--dim);font-weight:600;
+  min-height:34px;padding:.36em .85em;font-size:.9rem;white-space:nowrap;border-radius:999px}
+.nav button:hover{background:var(--panel2);color:var(--ink)}
+.nav button.on{background:var(--brand);color:var(--brandInk)}
 
-.card{background:linear-gradient(180deg,var(--surface2),var(--surface));border:1px solid var(--rim);
-  border-radius:var(--r);padding:var(--pad);box-shadow:var(--shadow);margin-bottom:14px}
-.card > h2{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:12px}
-.hint{color:var(--faint);font-size:.8rem;line-height:1.45}
+.card{background:var(--panel);border:1px solid var(--rim);border-radius:var(--r);
+  padding:var(--pad);box-shadow:var(--shadow);margin-bottom:14px}
+.card > h2{font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);margin-bottom:14px}
+.hint{color:var(--faint);font-size:.81rem;line-height:1.5}
 
 /* status */
-.state{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.pill{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.45rem;font-weight:700;letter-spacing:.06em;
-  padding:.16em .58em;border-radius:var(--rs);background:#100a10;border:1px solid var(--rim2)}
-.s-SAFE{color:var(--ok);border-color:#1e5c39} .s-ARMED,.s-PIN{color:var(--warn);border-color:#5d4715}
-.s-FIRING,.s-RUNNING{color:var(--danger);border-color:#5e2028} .s-SENT{color:var(--info);border-color:#22406e}
-.s-SETTINGS,.s-CONSOLE{color:var(--info);border-color:#22406e}
-.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin-top:12px}
-.fact{background:#110a11;border:1px solid var(--rim);border-radius:var(--rs);padding:9px 11px}
-.fact .k{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
-.fact .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.96rem;margin-top:3px;overflow-wrap:anywhere}
-.bar{height:6px;border-radius:999px;background:#241420;overflow:hidden;margin-top:10px}
-.bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand2));
-  transition:width .25s}
+.state{display:flex;align-items:center;gap:13px;margin-bottom:12px;flex-wrap:wrap}
+.pill{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.16rem;font-weight:700;
+  letter-spacing:.05em;padding:.3em .72em;border-radius:var(--rs);border:1px solid transparent}
+.s-SAFE{color:var(--ok);background:var(--okSoft);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.s-ARMED,.s-PIN{color:var(--warn);background:var(--warnSoft);border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
+.s-FIRING,.s-RUNNING{color:var(--danger);background:var(--dangerSoft);border-color:color-mix(in srgb,var(--danger) 32%,transparent)}
+.s-SENT,.s-SETTINGS,.s-CONSOLE{color:var(--info);background:var(--infoSoft);border-color:color-mix(in srgb,var(--info) 30%,transparent)}
+.rowline{display:flex;align-items:baseline;gap:10px;padding:9px 11px;margin-top:10px;
+  background:var(--panel2);border:1px solid var(--rim);border-radius:var(--rs)}
+.rowline .k{font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);
+  font-weight:650;flex:0 0 auto}
+.rowline .v{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;font-size:.92rem}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:9px;margin-top:14px}
+.fact{background:var(--panel2);border:1px solid var(--rim);border-radius:var(--rs);padding:10px 12px}
+.fact .k{font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);font-weight:650}
+.fact{min-width:0}
+.fact .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.95rem;
+  margin-top:4px;overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
+.bar{height:5px;border-radius:999px;background:var(--rim);overflow:hidden;margin-top:11px}
+.bar > i{display:block;height:100%;width:0;background:var(--brand);transition:width .25s}
 
 /* fire control */
-.fire{border:1px solid var(--rim2);border-radius:var(--r);padding:13px;background:#150a11}
-.fire.live{border-color:var(--danger);background:#25090e;box-shadow:0 0 0 1px rgba(255,85,102,.28) inset}
-.fireHead{display:flex;align-items:center;gap:11px}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:0 0 auto}
-.fire.live .dot{background:var(--danger);box-shadow:0 0 10px var(--danger)}
-.btns{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+.fire{border:1px solid var(--rim2);border-radius:var(--r);padding:14px;background:var(--panel2)}
+.fire.live{border-color:var(--danger);background:var(--dangerSoft)}
+.fireHead{display:flex;align-items:flex-start;gap:11px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:0 0 auto;margin-top:6px}
+.fire.live .dot{background:var(--danger);box-shadow:0 0 0 4px color-mix(in srgb,var(--danger) 22%,transparent)}
+.btns{display:flex;gap:9px;flex-wrap:wrap;margin-top:13px;align-items:stretch}
+.btns > button{flex:1 1 auto;min-width:0}
 
-/* settings groups */
-.group{border:1px solid var(--rim);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
-.group > h3{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
-  background:#1b1019;padding:10px 13px;border-bottom:1px solid var(--rim)}
-.set{display:flex;align-items:center;gap:13px;padding:12px 13px;border-bottom:1px solid #241420}
+/* groups */
+.group{border:1px solid var(--rim);border-radius:var(--r);margin-bottom:13px;overflow:hidden;background:var(--panel)}
+.group > h3{font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);
+  background:var(--panel2);padding:11px 14px;border-bottom:1px solid var(--rim);font-weight:700}
+.set{display:flex;align-items:center;gap:14px;padding:13px 14px;border-bottom:1px solid var(--rim);
+  flex-wrap:wrap}
+.set .txt{min-width:150px}
 .set:last-child{border-bottom:0}
 .set .txt{flex:1 1 auto}
-.set .txt b{display:block;font-weight:600;font-size:.94rem}
-.set .txt span{color:var(--faint);font-size:.77rem;display:block;margin-top:2px;line-height:1.35}
-.set select,.set input[type=number]{width:auto;min-width:132px;flex:0 0 auto}
+.set .txt b{display:block;font-weight:600;font-size:.93rem}
+.set .txt span{color:var(--faint);font-size:.78rem;display:block;margin-top:3px;line-height:1.4}
+.set select,.set input[type=number],.set input[type=text],.set input[type=password]{
+  width:auto;min-width:150px;max-width:100%;flex:1 1 150px}
 
 /* lists */
 .list{display:flex;flex-direction:column;gap:7px}
-.item{display:flex;align-items:center;gap:10px;background:#110a11;border:1px solid var(--rim);
-  border-radius:var(--rs);padding:.6em .75em;cursor:pointer;transition:border-color .12s}
-.item:hover{border-color:var(--rim2)}
-.item.on{border-color:var(--brand);box-shadow:0 0 0 1px rgba(230,70,90,.3) inset}
-.item .nm{flex:1;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
-.badge{font-size:.6rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;
-  padding:.24em .5em;border-radius:5px;background:var(--brand);color:#fff}
-.badge.role{background:#2a1826;color:var(--dim);border:1px solid var(--rim2)}
-.empty{color:var(--faint);text-align:center;padding:26px 12px;font-size:.9rem;line-height:1.6}
+.item{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--rim);
+  border-radius:var(--rs);padding:.62em .8em;cursor:pointer;transition:border-color .12s,background .12s}
+.item:hover{border-color:var(--rim2);background:var(--panel)}
+.item.on{border-color:var(--brand);background:var(--brandSoft)}
+.item .nm{flex:1;min-width:0;word-break:break-word;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.89rem}
+.badge{font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700;
+  padding:.26em .55em;border-radius:5px;background:var(--brand);color:var(--brandInk)}
+.badge.role{background:var(--panel);color:var(--dim);border:1px solid var(--rim2)}
+.empty{color:var(--faint);text-align:center;padding:28px 12px;font-size:.9rem;line-height:1.65}
 .log{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,Consolas,monospace;
-  font-size:12.5px;background:#0d060c;border:1px solid var(--rim);border-radius:var(--rs);
-  padding:12px;max-height:330px;overflow:auto;color:#cbb6c4}
-.danger{border:1px solid #5e2028;border-radius:var(--r);padding:13px;background:#1c0a0f;margin-top:6px}
-.danger h3{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--danger);margin-bottom:6px}
+  font-size:12.5px;background:var(--panel2);border:1px solid var(--rim);border-radius:var(--rs);
+  padding:13px;max-height:330px;overflow:auto;color:var(--dim)}
+.danger{border:1px solid color-mix(in srgb,var(--danger) 35%,transparent);border-radius:var(--r);
+  padding:14px;background:var(--dangerSoft);margin-top:8px}
+.danger h3{font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;color:var(--danger);
+  margin-bottom:7px;font-weight:700}
 
 .hidden{display:none!important}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);
-  background:#241624;border:1px solid var(--rim2);padding:.75em 1.15em;border-radius:var(--rs);
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);
+  background:var(--ink);color:var(--bg);padding:.72em 1.15em;border-radius:var(--rs);
   box-shadow:var(--shadow);opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;
-  z-index:50;max-width:88vw;text-align:center;font-size:.92rem}
+  z-index:50;max-width:88vw;text-align:center;font-size:.9rem;font-weight:500}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .sessionbar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:none;gap:12px;
-  align-items:center;justify-content:center;flex-wrap:wrap;padding:.85em 1em;
-  background:linear-gradient(180deg,#3a2408,#2a1a06);border-top:1px solid var(--warn)}
+  align-items:center;justify-content:center;flex-wrap:wrap;padding:.9em 1em;
+  background:var(--panel);border-top:1px solid var(--rim);box-shadow:var(--shadowUp)}
 .sessionbar.show{display:flex}
 .sessionbar b{color:var(--warn)}
 </style></head>
@@ -182,6 +219,11 @@ label.lbl{display:block;font-size:.72rem;letter-spacing:.09em;text-transform:upp
     <span class="mark"></span><span class="wordmark">DOLOS</span>
     <span class="grow"></span>
     <span class="chip" id="roleChip">—</span>
+    <div class="seg" id="themeSeg" role="group" aria-label="Colour theme">
+      <button data-t="auto"  title="Follow this device">Auto</button>
+      <button data-t="light" title="Always light">Light</button>
+      <button data-t="dark"  title="Always dark">Dark</button>
+    </div>
     <button class="b-quiet" id="logoutBtn">Sign out</button>
   </div>
 
@@ -198,10 +240,11 @@ label.lbl{display:block;font-size:.72rem;letter-spacing:.09em;text-transform:upp
       <h2>Device status</h2>
       <div class="state">
         <span class="pill" id="pill">—</span>
-        <div class="grow">
-          <div class="mono" id="stPayload" style="font-size:.95rem;overflow-wrap:anywhere">—</div>
-          <div class="hint" id="stProgress"></div>
-        </div>
+        <div class="hint" id="stProgress" style="flex:1"></div>
+      </div>
+      <div class="rowline">
+        <span class="k">Payload</span>
+        <span class="mono v" id="stPayload">—</span>
       </div>
       <div class="bar"><i id="stBar"></i></div>
       <div class="facts" id="facts"></div>
@@ -296,6 +339,30 @@ label.lbl{display:block;font-size:.72rem;letter-spacing:.09em;text-transform:upp
             <option value="menu">No settings menu</option>
             <option value="full">Locked — one job only</option>
           </select>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Internet uplink</h3>
+        <div class="set">
+          <span class="txt"><b>Join a network</b><span>Keeps the console AP running and also connects
+            this device to Wi-Fi, so payloads and tooling can reach the internet</span></span>
+          <div class="sw" data-key="uplink"></div>
+        </div>
+        <div class="set">
+          <span class="txt"><b>Network name</b><span>2.4 GHz only &mdash; this radio has no 5 GHz</span></span>
+          <input data-key="uplink_ssid" autocapitalize="none" spellcheck="false" placeholder="SSID">
+        </div>
+        <div class="set">
+          <span class="txt"><b>Network password</b><span>Stored on the device, never written to the card</span></span>
+          <input data-key="uplink_pass" type="password" autocomplete="new-password" placeholder="leave blank for open">
+        </div>
+        <div class="set">
+          <span class="txt"><b>Status</b><span id="upStatus">Not connected</span></span>
+        </div>
+        <div class="hint" style="padding:0 14px 13px">
+          Joining a network makes this device reachable from it, and both radios share
+          one antenna &mdash; the console link may stutter while the uplink reconnects.
         </div>
       </div>
 
@@ -419,7 +486,7 @@ $("#logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});locat
 
 function renderStatus(s){
   const pill=$("#pill"); pill.textContent=s.mode; pill.className="pill s-"+s.mode;
-  $("#stPayload").textContent=(s.count>1?`${s.idx}/${s.count}  `:"")+(s.payload||"—");
+  $("#stPayload").textContent=(s.count>1?`${s.idx} of ${s.count} — `:"")+(s.payload||"—");
   const running = s.mode==="RUNNING"||s.mode==="FIRING";
   $("#stProgress").textContent = running && s.lines
       ? `line ${s.cur} of ${s.lines}` : (s.dry?"Dry run — nothing will be typed":"");
@@ -431,6 +498,11 @@ function renderStatus(s){
     ["USB",s.usb?"connected":"no host"],
     ["Lock keys",((leds&2)?"C":"·")+((leds&1)?"N":"·")+((leds&4)?"S":"·")],
   ].map(([k,v])=>`<div class="fact"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
+
+  const up=$("#upStatus");
+  if(up) up.textContent = s.uplink
+      ? ("Connected to "+(s.uplink_ssid||"?")+" \u2014 "+(s.uplink_ip||"no address yet"))
+      : (s.uplink_ssid ? ("Trying to join "+s.uplink_ssid+"\u2026") : "Not connected");
 
   const on=!!s.remote_fire;
   $("#fire").classList.toggle("live",on);
@@ -505,6 +577,9 @@ $("#saveBtn").onclick=async()=>{
 function renderSettings(j){
   $$('[data-key]').forEach(el=>{
     const k=el.dataset.key;
+    /* Passwords are write-only: the device never sends them back, so leave
+       whatever the operator has typed alone instead of blanking it. */
+    if(k.endsWith("_pass")) return;
     const v = k==="remote_fire"?j.remotefire : k==="ui_lock"?j.uilock : j[k];
     if(el.classList.contains("sw")) el.classList.toggle("on",!!v);
     else el.value=(v===undefined||v===null)?"":v;
@@ -568,6 +643,25 @@ async function loadAudit(){
   $("#auditLog").textContent = r.ok ? ((await r.text())||"No runs recorded yet.") : "—";
 }
 $("#auditRefresh").onclick=loadAudit;
+
+/* ── theme ──────────────────────────────────────────────────────────────
+   Three states, cycled by the header button: auto (follow the phone), light,
+   dark. "auto" is the default because this console is opened on someone's
+   own device, which already knows what they prefer. */
+function applyTheme(t){
+  const dark = t==="dark" || (t==="auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark?"dark":"light");
+  $$("#themeSeg button").forEach(b=>b.classList.toggle("on", b.dataset.t===t));
+}
+let THEME="auto";
+try{THEME=localStorage.getItem("dolos-theme")||"auto";}catch(e){}
+applyTheme(THEME);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{if(THEME==="auto")applyTheme("auto");});
+$$("#themeSeg button").forEach(b=>b.onclick=()=>{
+  THEME=b.dataset.t;
+  try{localStorage.setItem("dolos-theme",THEME);}catch(e){}
+  applyTheme(THEME);
+});
 
 const SECTIONS=["overview","payloads","settings","users","audit"];
 $$("#nav button").forEach(b=>b.onclick=()=>{

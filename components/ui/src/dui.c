@@ -371,6 +371,14 @@ void dui_render(canvas_t *cv, const dui_state_t *st)
         case DUI_MENU:
         case DUI_INFO: break;   /* drawn above; listed so -Wswitch stays happy */
         case DUI_DONE:
+            if (st->run_failed) {
+                big_center(cv, W / 2, 40, "NOT SENT", DU_FIRE, 2);
+                cv_text_center(cv, W / 2, 70,
+                               st->run_fail_msg ? st->run_fail_msg : "PAYLOAD PRODUCED NO KEYSTROKES",
+                               DU_INK, -1, 1);
+                cv_text_center(cv, W / 2, 88, "NOTHING WAS TYPED", DU_DIM, -1, 1);
+                break;
+            }
             big_center(cv, W / 2, 54, st->dry_run ? "DRY-RUN COMPLETE" : "PAYLOAD SENT", DU_INK, 1);
             big_center(cv, W / 2, 76, "TAP TO RETURN TO SAFE", DU_DIM, 1);
             break;

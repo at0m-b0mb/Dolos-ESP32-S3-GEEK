@@ -209,4 +209,30 @@ TEST_MAIN_BEGIN
         CHECK(cv.oob == 0, "safe-boot screen fits");
         st.safe_boot = false;
     }
+
+    SUITE("dui: a run that typed nothing says so, instead of looking like a success");
+    {
+        dolos_config_t c9; config_defaults(&c9);
+        memset(&st, 0, sizeof(st)); st.cfg = &c9;
+        st.mode = DUI_DONE; st.payload_name = "PAYLOAD.TXT";
+        st.run_failed = true; st.run_fail_msg = "OUT OF MEMORY FOR THE INTERPRETER";
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "the failure screen fits, oob=%u", cv.oob);
+
+        st.run_failed = false; st.run_fail_msg = NULL;
+        cv.oob = 0; dui_render(&cv, &st);
+        CHECK(cv.oob == 0, "the ordinary SENT screen still fits, oob=%u", cv.oob);
+    }
+
+    SUITE("canvas: an absent string draws nothing instead of crashing");
+    {
+        static uint16_t px[240 * 135];
+        canvas_t cv; cv_init(&cv, px, 240, 135);
+        cv_clear(&cv, 0);
+        int x = cv_text(&cv, 10, 10, NULL, 0xFFFF, -1, 1);
+        CHECK(x == 10, "NULL text advances the cursor not at all");
+        CHECK(cv_text_width(NULL, 1) == 0, "and measures as zero wide");
+        cv_text_center(&cv, 120, 20, NULL, 0xFFFF, -1, 1);
+        CHECK(cv.oob == 0, "nothing was drawn out of bounds");
+    }
 TEST_MAIN_END

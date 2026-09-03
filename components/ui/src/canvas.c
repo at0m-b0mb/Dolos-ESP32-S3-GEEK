@@ -120,6 +120,11 @@ int cv_char(canvas_t *cv, int x, int y, char c, uint16_t fg, int32_t bg, int sca
 
 int cv_text(canvas_t *cv, int x, int y, const char *s, uint16_t fg, int32_t bg, int scale)
 {
+    /* Several dui_state_t strings are documented as optional. The big-font
+     * versions below have always tolerated NULL; these did not, so one absent
+     * name would panic the device from the DISPLAY path - taking the console
+     * and the safety UI down to draw a label. */
+    if (!s) return x;
     for (; *s; s++) x = cv_char(cv, x, y, *s, fg, bg, scale);
     return x;
 }
@@ -127,7 +132,7 @@ int cv_text(canvas_t *cv, int x, int y, const char *s, uint16_t fg, int32_t bg, 
 int cv_text_width(const char *s, int scale)
 {
     if (scale < 1) scale = 1;
-    int n = 0; for (; *s; s++) n++;
+    int n = 0; for (; s && *s; s++) n++;
     return n * (FONT5X8_W + 1) * scale;
 }
 

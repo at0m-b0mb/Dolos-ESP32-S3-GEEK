@@ -59,6 +59,8 @@ typedef struct {
     bool     console_up;       /* HTTP console actually running            */
     bool     safe_boot;        /* last boot crashed: optional subsystems off */
     ui_lock_t ui_lock;         /* how much of the UI the button may reach */
+    bool     run_failed;       /* the last run typed nothing               */
+    const char *run_fail_msg;  /* and why, in plain words                  */
     int      lint_problems;    /* >0 = payload has errors, arming blocked */
     int      lint_line;        /* line number of the first problem        */
     const char *lint_msg;      /* short description of it                 */
