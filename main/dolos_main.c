@@ -146,6 +146,33 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
  * that is what gets written back to the card. Detection returning UNKNOWN
  * changes nothing: the previous value stands. */
 static void load_selected(void);
+static bool sd_mount(void);
+static void scan_payloads(void);
+
+/* Notice a card that was inserted AFTER boot.
+ *
+ * sd_mount() used to run once, at startup. Boot the device with no card, push
+ * one in afterwards, and nothing happened: the payload list stayed empty and
+ * the button cycled a list of one built-in demo, with nothing on screen to say
+ * the card had been ignored. People plug the card in when they need it, not
+ * before. Retried only while idle, and only when there is no card - mounting
+ * underneath a running payload is never safe. */
+static void sd_hotplug_check(void)
+{
+    if (s_sd_ok) return;
+    if (!sd_mount()) return;
+    s_sd_ok = true;
+    ESP_LOGW(TAG, "SD card inserted - reading it now");
+    FILE *fp = fopen("/sdcard/DOLOS.CFG", "r");
+    if (fp) {
+        char cbuf[512]; int n = (int)fread(cbuf, 1, sizeof(cbuf) - 1, fp); fclose(fp);
+        if (n > 0) { cbuf[n] = 0; config_parse(cbuf, &s_cfg); }
+    }
+    usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
+    scan_payloads();
+    load_selected();
+}
+
 static void os_detect_apply(void)
 {
     if (!s_cfg.os_auto || s_flash_mode) return;
@@ -171,7 +198,12 @@ static bool sd_mount(void)
     spi_bus_config_t bus = { .sclk_io_num = BOARD_SD_PIN_SCLK, .mosi_io_num = BOARD_SD_PIN_MOSI,
                              .miso_io_num = BOARD_SD_PIN_MISO, .quadwp_io_num = -1,
                              .quadhd_io_num = -1, .max_transfer_sz = 4000 };
-    if (spi_bus_initialize(BOARD_SD_SPI_HOST, &bus, SPI_DMA_CH_AUTO) != ESP_OK) return false;
+    /* The bus can only be set up once for the life of the process, and this is
+     * now called again whenever a card is inserted - so ALREADY DONE is a
+     * success here, not a failure. Treating it as one meant a retry could never
+     * mount anything. */
+    esp_err_t be = spi_bus_initialize(BOARD_SD_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
+    if (be != ESP_OK && be != ESP_ERR_INVALID_STATE) return false;
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = BOARD_SD_SPI_HOST;
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
@@ -789,6 +821,13 @@ static void ui_task(void *arg)
         if (t - last_detect > 250 && mode_is_idle(s_mode)) {
             last_detect = t;
             lock(); os_detect_apply(); unlock();
+        }
+        /* A card pushed in after boot. Polled slowly: probing an empty slot
+         * costs an SPI transaction, and nobody inserts a card twice a second. */
+        static uint32_t last_sd;
+        if (!s_sd_ok && t - last_sd > 1500 && mode_is_idle(s_mode)) {
+            last_sd = t;
+            lock(); sd_hotplug_check(); unlock();
         }
 
         /* admin-gated remote requests from the console (physical arming is
