@@ -125,6 +125,17 @@ static bool mode_is_idle(dui_mode_t m);
  * moment the run ends. */
 static bool s_reload_pending;
 
+/* Destructive menu actions ask twice.
+ *
+ * NEW CREDENTIALS and FACTORY RESET both throw away the Wi-Fi key, so the
+ * operator is locked out of their own console until they read the new one off
+ * the screen. Both sat on a menu you step through with a single button, one
+ * hold away from happening by accident - which is exactly how it happened.
+ * The first hold arms the action and says what it will destroy; only a second,
+ * deliberate hold carries it out, and any other press cancels. */
+static menu_action_t s_confirm;          /* MENU_ACT_NONE = nothing pending */
+static const char *s_confirm_t1, *s_confirm_t2, *s_confirm_t3;
+
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 /* Adopt the host we actually detected, when the operator asked us to.
@@ -794,12 +805,37 @@ static void ui_task(void *arg)
 
         switch (s_mode) {
         case DUI_MENU: {
+            /* Anything that is not the confirming hold cancels a pending
+             * destructive action. Walking away must never carry it out. */
+            if (s_confirm != MENU_ACT_NONE && e != BTN_NONE && e != BTN_HOLD) {
+                s_confirm = MENU_ACT_NONE;
+                e = BTN_NONE;                    /* the press was the cancel */
+            }
             if (e == BTN_TAP) { s_menu_sel = (s_menu_sel + 1) % MENU__COUNT; }
-            else if (e == BTN_DOUBLE) { s_mode = DUI_SAFE; stage_ms = t; }
+            else if (e == BTN_DOUBLE) { s_mode = DUI_SAFE; stage_ms = t; s_confirm = MENU_ACT_NONE; }
             else if (e == BTN_HOLD) {
-                menu_action_t a = menu_activate(&s_cfg, (menu_item_t)s_menu_sel);
+                menu_action_t a;
+                bool just_armed = false;
+                if (s_confirm != MENU_ACT_NONE) {
+                    a = s_confirm;               /* the second, deliberate hold */
+                    s_confirm = MENU_ACT_NONE;
+                } else {
+                    a = menu_activate(&s_cfg, (menu_item_t)s_menu_sel);
+                    if (a == MENU_ACT_FACTORY || a == MENU_ACT_NEW_CREDS) {
+                        s_confirm = a;
+                        s_confirm_t1 = (a == MENU_ACT_FACTORY) ? "FACTORY RESET" : "NEW CREDENTIALS";
+                        s_confirm_t2 = (a == MENU_ACT_FACTORY)
+                                       ? "ERASES SETTINGS AND THE WI-FI KEY"
+                                       : "CHANGES THE WI-FI KEY - YOU WILL BE";
+                        s_confirm_t3 = (a == MENU_ACT_FACTORY)
+                                       ? "HOLD AGAIN TO CONFIRM - TAP CANCELS"
+                                       : "SIGNED OUT. HOLD AGAIN - TAP CANCELS";
+                        a = MENU_ACT_NONE;       /* not this time */
+                        just_armed = true;       /* and nothing was changed */
+                    }
+                }
                 if (a == MENU_ACT_SAVE)      { config_save(); s_cfg_dirty = false; }
-                else if (a == MENU_ACT_EXIT) { s_mode = DUI_SAFE; stage_ms = t; }
+                else if (a == MENU_ACT_EXIT) { s_mode = DUI_SAFE; stage_ms = t; s_confirm = MENU_ACT_NONE; }
                 else if (a == MENU_ACT_CONSOLE_INFO) { s_mode = DUI_INFO; stage_ms = t; }
                 else if (a == MENU_ACT_FACTORY) {
                     if (cv) {
@@ -835,7 +871,9 @@ static void ui_task(void *arg)
                     ESP_LOGW(TAG, "console credentials cleared - restarting to mint new ones");
                     esp_restart();
                 }
-                else { s_cfg_dirty = true; lock(); config_apply_live(); unlock(); }
+                /* Arming a confirmation changed no setting, so it must not mark
+                 * the config dirty or re-apply anything. */
+                else if (!just_armed) { s_cfg_dirty = true; lock(); config_apply_live(); unlock(); }
             }
             break;
         }
@@ -973,7 +1011,13 @@ static void ui_task(void *arg)
         if (st.countdown < 1) st.countdown = 1;
         st.anim++;
 
-        if (cv) { dui_render(cv, &st); display_flush(); }
+        if (cv) {
+            if (s_confirm != MENU_ACT_NONE)
+                dui_render_notice(cv, s_confirm_t1, s_confirm_t2, s_confirm_t3);
+            else
+                dui_render(cv, &st);
+            display_flush();
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
