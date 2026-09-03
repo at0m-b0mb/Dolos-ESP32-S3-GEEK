@@ -1273,6 +1273,32 @@ static void ensure_credentials(void)
     nvs_close(h);
 }
 
+/* Bisect the boot: which stage corrupts the heap?
+ *
+ * The crash is never where the damage was done - it lands in whichever malloc
+ * or heap walk next touches the poisoned block, which so far has been TinyUSB's
+ * task stack and then the heap logging in wifi_bring_up(). With poisoning on,
+ * checking integrity after each stage names the stage responsible. Results are
+ * buffered until the card is mounted, because the earliest stages run before
+ * there is anywhere to write them. */
+static char   s_heaplog[640];
+static size_t s_heaplog_n;
+
+static void heap_checkpoint(const char *stage)
+{
+    bool ok = heap_caps_check_integrity_all(false);
+    if (s_heaplog_n < sizeof(s_heaplog) - 1) {
+        int w = snprintf(s_heaplog + s_heaplog_n, sizeof(s_heaplog) - s_heaplog_n,
+                         "  %-20s %s\n", stage, ok ? "ok" : "*** CORRUPT ***");
+        if (w > 0 && (size_t)w < sizeof(s_heaplog) - s_heaplog_n) s_heaplog_n += (size_t)w;
+    }
+    ESP_LOGW(TAG, "heap after %s: %s", stage, ok ? "ok" : "CORRUPT");
+    if (s_sd_ok && s_heaplog_n) {
+        FILE *f = fopen("/sdcard/DOLOS_HEAP.LOG", "a");
+        if (f) { fwrite(s_heaplog, 1, s_heaplog_n, f); fclose(f); s_heaplog_n = 0; }
+    }
+}
+
 void app_main(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -1290,9 +1316,11 @@ void app_main(void)
     g_boot_ms = now_ms();
 
     display_init();
+    heap_checkpoint("display_init");
 
     config_defaults(&s_cfg);
     s_sd_ok = sd_mount();
+    heap_checkpoint("sd_mount");
     if (s_sd_ok) {
         FILE *fp = fopen("/sdcard/DOLOS.CFG", "r");
         if (fp) {
@@ -1319,9 +1347,11 @@ void app_main(void)
         }
     }
     bootlog_open();
+    heap_checkpoint("bootlog_open");
     /* Work out which partition could be shared, but do not share it: nothing is
      * exposed until a payload asks with ATTACKMODE STORAGE. */
     if (s_sd_ok) usb_msc_init(s_card, s_cfg.msc_partition);
+    heap_checkpoint("usb_msc_init");
     /* The payload text: PSRAM by preference, a small internal buffer only if
      * there is no PSRAM at all. Never a large static in internal DRAM. */
     s_payload_buf = heap_caps_malloc(PAYLOAD_MAX, MALLOC_CAP_SPIRAM);
@@ -1335,6 +1365,7 @@ void app_main(void)
     ESP_LOGW(TAG, "payload buffer: %u bytes at %p", (unsigned)s_payload_cap, s_payload_buf);
     load_selected();
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
+    heap_checkpoint("load_selected");
 
     if (s_flash_mode) ESP_LOGW(TAG, "FLASH MODE (BOOT held) - USB-HID NOT started");
     else              usb_hid_init(s_cfg.usb_vid, s_cfg.usb_pid, s_cfg.usb_mfr, s_cfg.usb_product);
@@ -1348,8 +1379,10 @@ void app_main(void)
      * see a fault in the Wi-Fi path at all (in normal operation TinyUSB owns
      * the USB pins and panics print to a port that no longer exists). */
     s_lock = xSemaphoreCreateMutex();
+    heap_checkpoint("usb_hid_init");
     g_remote_fire_enabled = s_cfg.remote_fire;
     ensure_credentials();
+    heap_checkpoint("ensure_credentials");
     /* Degrade in stages rather than all at once.
      *
      * A crash used to cost the whole radio, which threw away the console as
