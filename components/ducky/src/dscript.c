@@ -452,6 +452,35 @@ void *ducky_big_alloc(size_t n)
 #endif
 }
 
+/* HOT scratch: small, touched per character, and therefore INTERNAL.
+ *
+ * The counterpart to ducky_big_alloc(). Putting everything in external RAM was
+ * the wrong lesson from the earlier work: PSRAM here runs at 40 MHz and is far
+ * slower than internal SRAM, so the parser's per-character buffers belong in
+ * fast memory. Bulk that is read once, like the payload text and the line
+ * index, does not. Cold data external, hot data internal. */
+void *ducky_hot_alloc(size_t n)
+{
+#ifdef ESP_PLATFORM
+    void *p = heap_caps_calloc(1, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!p) p = ducky_big_alloc(n);          /* slow beats not working */
+    return p;
+#else
+    return calloc(1, n);
+#endif
+}
+
+/* Long operations must not starve the system.
+ *
+ * ducky_lint() walks a payload character by character; on a 16 KB script that
+ * is long enough for a high-priority task to keep the idle task off the CPU
+ * past the 5 s task-watchdog timeout - which presents as the device freezing
+ * and then rebooting. The engine cannot call FreeRTOS (it is host-tested), so
+ * the caller installs a yield. */
+static void (*s_yield)(void);
+void ducky_set_yield(void (*fn)(void)) { s_yield = fn; }
+void ducky_yield(void) { if (s_yield) s_yield(); }
+
 dscript_t *dscript_shared(void)
 {
     static dscript_t *one;

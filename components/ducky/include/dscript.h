@@ -126,6 +126,14 @@ dscript_t *dscript_shared(void);
  * Allocated once and kept - never freed, never on a task stack. */
 void *ducky_big_alloc(size_t n);
 
+/* Small buffers touched per character: internal RAM on the device. */
+void *ducky_hot_alloc(size_t n);
+
+/* Installed by the firmware so long parses can let other tasks run. Without
+ * one, a big payload can hold the CPU past the task-watchdog timeout. */
+void ducky_set_yield(void (*fn)(void));
+void ducky_yield(void);
+
 /* Index the text and pre-scan FUNCTION definitions. false if it is unusable. */
 bool dscript_init(dscript_t *ds, const char *text);
 

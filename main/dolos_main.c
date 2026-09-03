@@ -37,6 +37,7 @@
 #include "dconfig.h"
 #include "layout.h"
 #include "lint.h"
+#include "dscript.h"
 #include "unicode.h"   /* os_name */
 #include "menu.h"
 #include "button.h"
@@ -258,6 +259,15 @@ static void scan_payloads(void)
                       "are not listed", MAX_PAYLOADS);
 }
 
+/* Handed to the DuckyScript engine so a long parse cannot starve the system.
+ *
+ * One tick is enough: it puts this task at the back of the queue for its
+ * priority and lets the idle task run, which is what the task watchdog is
+ * actually watching for. Linting a 16 KB payload on the UI task at priority 5
+ * held the CPU long enough to trip it - the device froze, then rebooted, then
+ * came up in safe boot. */
+static void engine_yield(void) { vTaskDelay(1); }
+
 static void load_selected(void)
 {
     /* NEVER rewrite the buffer the payload task is reading.
@@ -333,7 +343,12 @@ static void load_selected(void)
     s_total_lines = payload_count_lines(s_payload);
     memset(&s_lint_first, 0, sizeof(s_lint_first));
     heap_checkpoint("lint_begin");
+    uint32_t t0 = now_ms();
     s_lint_problems = ducky_lint(s_payload, s_cfg.layout, s_cfg.os, &s_lint_first, 1);
+    uint32_t lint_ms = now_ms() - t0;
+    if (lint_ms > 250)
+        ESP_LOGW(TAG, "linting '%s' (%d lines) took %lums",
+                 s_payload_name, s_total_lines, (unsigned long)lint_ms);
     heap_checkpoint("lint_end");
     if (s_lint_problems > 0)
         ESP_LOGW(TAG, "payload '%s' has %d problem(s); first at line %d: %s (arming blocked)",
@@ -1403,6 +1418,7 @@ void app_main(void)
     g_boot_ms = now_ms();
 
     display_init();
+    ducky_set_yield(engine_yield);   /* before anything parses a payload */
     heap_checkpoint("display_init");
 
     config_defaults(&s_cfg);

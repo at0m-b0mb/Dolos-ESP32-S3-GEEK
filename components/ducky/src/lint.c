@@ -100,7 +100,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
 {
     /* 8.7 KB, in external RAM rather than a static in internal. */
     static ducky_state_t *stp;
-    if (!stp) stp = (ducky_state_t *)ducky_big_alloc(sizeof(*stp));
+    if (!stp) stp = (ducky_state_t *)ducky_hot_alloc(sizeof(*stp));
     if (!stp) return 0;                      /* no memory: judge nothing */
     ducky_state_t st_unused; (void)st_unused;
     ducky_state_init(stp);
@@ -123,7 +123,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
      * cannot sit on the stack of the UI task. Every caller of ducky_lint()
      * holds the app lock, so there is one linter at a time. */
     static char *line;
-    if (!line) line = (char *)ducky_big_alloc(LINT_LINE_MAX);
+    if (!line) line = (char *)ducky_hot_alloc(LINT_LINE_MAX);
     if (!line) return 0;
     char tok[40];
     int problems = 0, kept = 0, lineno = 0;
@@ -176,6 +176,10 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
         line[l] = 0;
         if (*p == '\n') p++;
         lineno++;
+        /* Every 32 lines, let anything else run. A 16 KB payload is thousands
+         * of character operations on a high-priority task, which is enough to
+         * starve the idle task past the watchdog. */
+        if ((lineno & 31) == 0) ducky_yield();
 
         /* Everything between a block opener and its END_ is TEXT TO TYPE, not
          * script: PowerShell, bash, whatever the payload is writing out. The

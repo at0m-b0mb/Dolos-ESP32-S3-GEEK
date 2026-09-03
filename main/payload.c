@@ -328,7 +328,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
     /* 11.5 KB of actions and 8.7 KB of parser state: external RAM, not the
      * internal pool the radio and USB need. Allocated once, never freed. */
     static ducky_action_t *acts;
-    if (!acts) acts = (ducky_action_t *)ducky_big_alloc(sizeof(ducky_action_t) * 192);
+    if (!acts) acts = (ducky_action_t *)ducky_hot_alloc(sizeof(ducky_action_t) * 192);
     if (!acts) { payload_set_fail("out of memory for the action buffer"); return 0; }
     /* Start from a known keyboard state.
      *
@@ -363,7 +363,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
     /* static: ducky_state_t now carries an 8 KB scratch buffer, and one
      * payload runs at a time. */
     static ducky_state_t *stp;
-    if (!stp) stp = (ducky_state_t *)ducky_big_alloc(sizeof(*stp));
+    if (!stp) stp = (ducky_state_t *)ducky_hot_alloc(sizeof(*stp));
     if (!stp) { payload_set_fail("out of memory for the parser"); return 0; }
     ducky_state_t *st_p = stp; ducky_state_init(st_p);
 #define st (*st_p)
