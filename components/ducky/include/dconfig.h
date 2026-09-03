@@ -39,6 +39,11 @@ const char *ui_lock_key(ui_lock_t l);      /* "off" | "menu" | "full" */
 typedef struct {
     kb_layout_t   layout;
     target_os_t   os;             /* Unicode input-method target OS */
+    /* Work the OS out from how the host enumerates us, instead of trusting a
+     * setting nobody remembers to change. A wrong OS silently turns every
+     * accented character into rubbish, because the three systems type Unicode
+     * in three incompatible ways. */
+    bool          os_auto;
     dolos_speed_t speed;
     bool          dry_run;
     uint32_t      default_delay_ms;

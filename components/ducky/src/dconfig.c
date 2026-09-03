@@ -13,6 +13,10 @@ void config_defaults(dolos_config_t *c)
     memset(c, 0, sizeof(*c));
     c->layout = LAYOUT_US;
     c->os = OS_WINDOWS;
+    /* Automatic by default. A hand-set OS is a trap: get it wrong and every
+     * accented character silently turns to rubbish, because the three systems
+     * type Unicode in three incompatible ways. */
+    c->os_auto = true;
     c->speed = SPEED_BALANCED;
     c->dry_run = false;
     c->default_delay_ms = 0;
@@ -128,7 +132,10 @@ void config_parse(const char *text, dolos_config_t *c)
         char *ve = val + strlen(val); while (ve > val && (ve[-1]==' '||ve[-1]=='\t'||ve[-1]=='\r')) *--ve = 0;
 
         if      (ieq(key, "layout")) c->layout = layout_from_name(val);
-        else if (ieq(key, "os") || ieq(key, "target_os")) c->os = os_from_name(val);
+        else if (ieq(key, "os") || ieq(key, "target_os")) {
+            if (ieq(val, "auto") || ieq(val, "detect")) c->os_auto = true;
+            else { c->os_auto = false; c->os = os_from_name(val); }
+        }
         else if (ieq(key, "speed")) {
             if (ieq(val, "fast")) c->speed = SPEED_FAST;
             else if (ieq(val, "reliable")) c->speed = SPEED_RELIABLE;

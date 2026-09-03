@@ -56,13 +56,95 @@ static tusb_desc_device_t s_dev = {
     .bNumConfigurations = 1,
 };
 
+/* ---- host operating-system detection ------------------------------------
+ *
+ * Asking the operator to set the target OS by hand is a trap: get it wrong and
+ * every non-ASCII character silently turns to rubbish, because Windows, Linux
+ * and macOS each type Unicode a completely different way. The host tells us
+ * what it is during enumeration, if we listen.
+ *
+ * The signals, in order of how much they are worth:
+ *
+ *  - Windows and Linux both push the keyboard LED state to a new keyboard
+ *    shortly after they configure it. macOS does NOT: it leaves the lock LEDs
+ *    alone until something changes them. No LED report is therefore strong
+ *    evidence of a Mac, and it is the distinction that matters most here
+ *    because macOS is the odd one out for Unicode.
+ *  - Linux binds usbhid with an explicit SET_PROTOCOL; Windows normally does
+ *    not bother for a device that reports the boot protocol already.
+ *  - macOS reads the initial input report over the control pipe (GET_REPORT),
+ *    which the other two rarely do.
+ *
+ * None of this is a standard, so the verdict carries its evidence with it, is
+ * printed on the screen and written to the log, and can always be overridden
+ * by setting `os=` in the config. A wrong guess must never be a silent one. */
+static volatile uint32_t s_report_desc_reqs;
+static volatile uint32_t s_get_report_reqs;
+static volatile bool     s_set_protocol_seen;
+static volatile bool     s_led_report_seen;
+static volatile uint32_t s_mount_ms;
+static char s_detect_why[96];
+
+/* macOS is decided by the ABSENCE of a message, so we have to wait long enough
+ * to be sure it is not merely late. Windows and Linux send theirs within a few
+ * tens of milliseconds of configuring the device. */
+#define OS_DETECT_SETTLE_MS 900u
+
+void tud_mount_cb(void)
+{
+    s_mount_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    s_led_report_seen = false;
+    s_set_protocol_seen = false;
+    s_get_report_reqs = 0;
+}
+
+void tud_hid_set_protocol_cb(uint8_t instance, uint8_t protocol)
+{
+    (void)instance; (void)protocol;
+    s_set_protocol_seen = true;
+}
+
+usb_host_os_t usb_hid_detect_os(void)
+{
+    if (!tud_mounted() || s_mount_ms == 0) {
+        snprintf(s_detect_why, sizeof(s_detect_why), "no host attached");
+        return USB_HOST_UNKNOWN;
+    }
+    uint32_t since = (uint32_t)(esp_timer_get_time() / 1000) - s_mount_ms;
+    if (since < OS_DETECT_SETTLE_MS && !s_led_report_seen) {
+        snprintf(s_detect_why, sizeof(s_detect_why), "still listening (%ums)", (unsigned)since);
+        return USB_HOST_UNKNOWN;          /* too early to call it a Mac */
+    }
+    if (!s_led_report_seen) {
+        snprintf(s_detect_why, sizeof(s_detect_why),
+                 "no lock-LED report in %ums%s", (unsigned)since,
+                 s_get_report_reqs ? ", host read the report over control" : "");
+        return USB_HOST_MAC;
+    }
+    if (s_set_protocol_seen) {
+        snprintf(s_detect_why, sizeof(s_detect_why), "LED report + SET_PROTOCOL");
+        return USB_HOST_LINUX;
+    }
+    snprintf(s_detect_why, sizeof(s_detect_why), "LED report, no SET_PROTOCOL");
+    return USB_HOST_WINDOWS;
+}
+
+const char *usb_hid_detect_why(void)  { return s_detect_why[0] ? s_detect_why : "not evaluated"; }
+bool     usb_hid_saw_led_report(void) { return s_led_report_seen; }
+uint32_t usb_hid_desc_requests(void)  { return s_report_desc_reqs; }
+
 /* --- TinyUSB HID callbacks --- */
-uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) { (void)instance; return s_hid_report; }
+uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
+{
+    (void)instance; s_report_desc_reqs++; return s_hid_report;
+}
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t type,
                                uint8_t *buffer, uint16_t reqlen)
 {
-    (void)instance; (void)report_id; (void)type; (void)buffer; (void)reqlen; return 0;
+    (void)instance; (void)report_id; (void)type; (void)buffer; (void)reqlen;
+    s_get_report_reqs++;              /* macOS reads the initial report this way */
+    return 0;
 }
 
 /* The host writes the keyboard LED state here (CapsLock/NumLock/ScrollLock).
@@ -71,7 +153,10 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
                            uint8_t const *buffer, uint16_t bufsize)
 {
     (void)instance; (void)report_id;
-    if (type == HID_REPORT_TYPE_OUTPUT && bufsize >= 1) s_leds = buffer[0];
+    if (type == HID_REPORT_TYPE_OUTPUT && bufsize >= 1) {
+        s_leds = buffer[0];
+        s_led_report_seen = true;     /* the signal that says "not a Mac" */
+    }
 }
 
 void usb_hid_init(uint16_t vid, uint16_t pid, const char *mfr, const char *product)

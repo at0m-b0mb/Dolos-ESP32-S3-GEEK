@@ -32,7 +32,12 @@ void menu_value(const dolos_config_t *c, menu_item_t item, char *out, size_t cap
     if (!out || cap == 0) return;
     switch (item) {
         case MENU_LAYOUT:      snprintf(out, cap, "%s", layout_name(c->layout)); break;
-        case MENU_OS:          snprintf(out, cap, "%s", os_name(c->os));         break;
+        /* In AUTO the detected system is shown beside the word, so the screen
+         * always says what the device will actually type for - never just
+         * "AUTO", which tells the operator nothing. */
+        case MENU_OS:          if (c->os_auto) snprintf(out, cap, "AUTO/%s", os_name(c->os));
+                               else            snprintf(out, cap, "%s", os_name(c->os));
+                               break;
         case MENU_SPEED:       snprintf(out, cap, "%s", speed_name(c->speed));   break;
         case MENU_DRYRUN:      snprintf(out, cap, "%s", c->dry_run     ? "ON" : "OFF"); break;
         case MENU_WIFI:        snprintf(out, cap, "%s", c->wifi_on     ? "ON" : "OFF"); break;
@@ -48,7 +53,11 @@ menu_action_t menu_activate(dolos_config_t *c, menu_item_t item)
             c->layout = (kb_layout_t)((c->layout + 1) % LAYOUT__COUNT);
             break;
         case MENU_OS:
-            c->os = (target_os_t)((c->os + 1) % 3);
+            /* AUTO -> WINDOWS -> LINUX -> MAC -> AUTO. Automatic is a real
+             * choice in the cycle, not a hidden default. */
+            if (c->os_auto)          { c->os_auto = false; c->os = OS_WINDOWS; }
+            else if (c->os == OS_MAC) c->os_auto = true;
+            else                      c->os = (target_os_t)(c->os + 1);
             break;
         case MENU_SPEED:
             c->speed = (dolos_speed_t)((c->speed + 1) % 3);
@@ -76,9 +85,10 @@ static const char *layout_key(kb_layout_t l)
         default: return "us";
     }
 }
-static const char *os_key(target_os_t o)
+static const char *os_key(const dolos_config_t *c)
 {
-    return o == OS_LINUX ? "linux" : o == OS_MAC ? "mac" : "windows";
+    if (c->os_auto) return "auto";
+    return c->os == OS_LINUX ? "linux" : c->os == OS_MAC ? "mac" : "windows";
 }
 static const char *speed_key(dolos_speed_t s)
 {
@@ -121,7 +131,7 @@ size_t config_write_text(const dolos_config_t *c, char *out, size_t cap)
         "bootlog=%s\n"
         "storage=%s\n"
         "storage_partition=%u\n",
-        layout_key(c->layout), os_key(c->os), speed_key(c->speed),
+        layout_key(c->layout), os_key(c), speed_key(c->speed),
         c->dry_run ? "on" : "off", (unsigned long)c->default_delay_ms,
         c->arm_pin, c->wifi_on ? "ap" : "off",
         c->wifi_ssid, c->admin_user,

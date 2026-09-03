@@ -14,6 +14,15 @@
 void usb_hid_init(uint16_t vid, uint16_t pid, const char *mfr, const char *product);
 bool usb_hid_ready(void);
 bool usb_hid_mounted(void);
+
+/* What kind of machine are we plugged into? Worked out from how the host
+ * behaved during enumeration - see usb_hid.c for the signals and their worth.
+ * USB_HOST_UNKNOWN means "not enough evidence yet", never "probably Windows". */
+typedef enum { USB_HOST_UNKNOWN = 0, USB_HOST_WINDOWS, USB_HOST_LINUX, USB_HOST_MAC } usb_host_os_t;
+usb_host_os_t usb_hid_detect_os(void);
+const char   *usb_hid_detect_why(void);   /* the evidence, in one short line */
+bool          usb_hid_saw_led_report(void);
+uint32_t      usb_hid_desc_requests(void);
 /* Block until the host has enumerated us (or the timeout expires). Typing into
  * a host that has not finished enumerating is simply discarded. */
 bool usb_hid_wait_mounted(uint32_t timeout_ms);

@@ -33,8 +33,13 @@ TEST_MAIN_BEGIN
         kb_layout_t first = c.layout;
         for (int i = 0; i < LAYOUT__COUNT; i++) menu_activate(&c, MENU_LAYOUT);
         CHECK(c.layout == first, "layout wraps after a full cycle");
-        for (int i = 0; i < 3; i++) menu_activate(&c, MENU_OS);
-        CHECK(c.os == OS_WINDOWS, "os wraps after 3 steps");
+        /* AUTO -> WINDOWS -> LINUX -> MAC -> AUTO: four states, not three,
+         * because automatic detection is a choice you can select. */
+        CHECK(c.os_auto, "the default is to detect the OS, not to assume one");
+        menu_activate(&c, MENU_OS); CHECK(!c.os_auto && c.os == OS_WINDOWS, "auto -> windows");
+        menu_activate(&c, MENU_OS); CHECK(c.os == OS_LINUX, "windows -> linux");
+        menu_activate(&c, MENU_OS); CHECK(c.os == OS_MAC,   "linux -> mac");
+        menu_activate(&c, MENU_OS); CHECK(c.os_auto, "mac wraps back to auto");
         for (int i = 0; i < 3; i++) menu_activate(&c, MENU_SPEED);
         CHECK(c.speed == SPEED_BALANCED, "speed wraps after 3 steps");
         /* no cycle may ever land out of range */
@@ -66,7 +71,7 @@ TEST_MAIN_BEGIN
     SUITE("config: saved settings round-trip through the parser");
     {
         dolos_config_t c; config_defaults(&c);
-        c.layout = LAYOUT_FR; c.os = OS_MAC; c.speed = SPEED_FAST;
+        c.layout = LAYOUT_FR; c.os = OS_MAC; c.os_auto = false; c.speed = SPEED_FAST;
         c.dry_run = true; c.default_delay_ms = 77; c.remote_fire = true; c.wifi_on = true;
         c.ui_lock = UI_LOCK_FULL;
         strcpy(c.arm_pin, "1234");
@@ -82,7 +87,7 @@ TEST_MAIN_BEGIN
         dolos_config_t back; config_defaults(&back);
         config_parse(text, &back);
         CHECK(back.layout == LAYOUT_FR, "layout survived");
-        CHECK(back.os == OS_MAC, "os survived");
+        CHECK(back.os == OS_MAC && !back.os_auto, "a manually chosen os survived");
         CHECK(back.speed == SPEED_FAST, "speed survived");
         CHECK(back.dry_run == true, "dry-run survived");
         CHECK(back.default_delay_ms == 77, "default delay survived");
@@ -160,5 +165,25 @@ TEST_MAIN_BEGIN
         CHECK(back.msc_partition == c.msc_partition,
               "storage partition survives, got %u", back.msc_partition);
         CHECK(back.ui_lock == c.ui_lock, "ui lock survives");
+    }
+
+    SUITE("os=auto round-trips as the word auto");
+    {
+        dolos_config_t c; config_defaults(&c);
+        CHECK(c.os_auto, "auto is the default");
+        char text[1024];
+        size_t n = config_write_text(&c, text, sizeof(text));
+        CHECK(n > 0 && strstr(text, "os=auto") != NULL, "written as os=auto");
+
+        dolos_config_t back; config_defaults(&back);
+        back.os_auto = false; back.os = OS_LINUX;
+        config_parse(text, &back);
+        CHECK(back.os_auto, "and read back as automatic");
+
+        /* an explicit setting still wins, and still turns automatic off */
+        config_parse("os=mac\n", &back);
+        CHECK(!back.os_auto && back.os == OS_MAC, "os=mac overrides detection");
+        config_parse("os=detect\n", &back);
+        CHECK(back.os_auto, "os=detect is accepted as a spelling of auto");
     }
 TEST_MAIN_END
