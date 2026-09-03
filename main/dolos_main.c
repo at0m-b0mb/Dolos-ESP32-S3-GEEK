@@ -146,6 +146,7 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
  * that is what gets written back to the card. Detection returning UNKNOWN
  * changes nothing: the previous value stands. */
 static void load_selected(void);
+static void heap_checkpoint(const char *stage);
 static bool sd_mount(void);
 static void scan_payloads(void);
 
@@ -277,7 +278,31 @@ static void load_selected(void)
         snprintf(path, sizeof(path), "/sdcard/%s", s_names[s_sel]);
         FILE *fp = s_payload_buf ? fopen(path, "r") : NULL;
         if (fp) {
-            int n = (int)fread(s_payload_buf, 1, s_payload_cap - 1, fp);
+            /* Read through a small INTERNAL bounce buffer, never straight into
+             * PSRAM.
+             *
+             * The payload buffer lives in PSRAM, and FATFS reads run through
+             * the SD card's SPI driver, which is DMA-driven. Handing a DMA
+             * path a PSRAM destination is a hazard on this chip - and the SPI
+             * bus here is configured with max_transfer_sz = 4000, far below the
+             * size being asked for. The heap was healthy at the checkpoint
+             * before this call and the device died before the next one, which
+             * is exactly the shape of a DMA write landing somewhere it should
+             * not. Filesystem data now only ever lands in internal memory, and
+             * we copy it across ourselves. */
+            static char bounce[1024];
+            size_t want = s_payload_cap - 1, got = 0;
+            for (;;) {
+                size_t chunk = want - got;
+                if (chunk == 0) break;
+                if (chunk > sizeof(bounce)) chunk = sizeof(bounce);
+                size_t r = fread(bounce, 1, chunk, fp);
+                if (r == 0) break;
+                memcpy(s_payload_buf + got, bounce, r);
+                got += r;
+                if (r < chunk) break;              /* end of file */
+            }
+            int n = (int)got;
             /* Is there MORE of the file than we just read? Half a payload that
              * looks like a whole one is the worst outcome: it types a script
              * that ends mid-line and reports success. */
@@ -298,6 +323,7 @@ static void load_selected(void)
             }
             if (n > 0) { s_payload_buf[n] = 0; s_payload = s_payload_buf;
                          s_payload_name = s_names[s_sel]; }
+            heap_checkpoint("payload_read");
         }
     } else {
         s_payload = DOLOS_DEMO_PAYLOAD;
@@ -305,7 +331,9 @@ static void load_selected(void)
     }
     s_total_lines = payload_count_lines(s_payload);
     memset(&s_lint_first, 0, sizeof(s_lint_first));
+    heap_checkpoint("lint_begin");
     s_lint_problems = ducky_lint(s_payload, s_cfg.layout, s_cfg.os, &s_lint_first, 1);
+    heap_checkpoint("lint_end");
     if (s_lint_problems > 0)
         ESP_LOGW(TAG, "payload '%s' has %d problem(s); first at line %d: %s (arming blocked)",
                  s_payload_name, s_lint_problems, s_lint_first.line, s_lint_first.msg);
@@ -1283,9 +1311,11 @@ static void ensure_credentials(void)
  * there is anywhere to write them. */
 static char   s_heaplog[640];
 static size_t s_heaplog_n;
+static bool   s_booting = true;   /* load_selected() runs later too; only log boot */
 
 static void heap_checkpoint(const char *stage)
 {
+    if (!s_booting) return;
     bool ok = heap_caps_check_integrity_all(false);
     if (s_heaplog_n < sizeof(s_heaplog) - 1) {
         int w = snprintf(s_heaplog + s_heaplog_n, sizeof(s_heaplog) - s_heaplog_n,
@@ -1363,6 +1393,7 @@ void app_main(void)
                  (unsigned)s_payload_cap);
     }
     ESP_LOGW(TAG, "payload buffer: %u bytes at %p", (unsigned)s_payload_cap, s_payload_buf);
+    heap_checkpoint("payload_alloc");
     load_selected();
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
     heap_checkpoint("load_selected");
@@ -1406,6 +1437,8 @@ void app_main(void)
      * sit on the splash looking bricked, with nothing anywhere saying why. It
      * is the last thing started, so if memory is this tight the honest thing is
      * to say so loudly rather than pretend the device came up. */
+    heap_checkpoint("before_ui_task");
+    s_booting = false;
     if (xTaskCreate(ui_task, "dolos_ui", 8192, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "FATAL: could not start the UI task - out of memory. "
                       "The screen and button will not respond.");
