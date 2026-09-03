@@ -93,4 +93,9 @@ CONFIG_ESP_COREDUMP_STACK_SIZE=1280
 #
 # Costs a little RAM and speed. Worth it until this is found; revisit before a
 # release build.
-CONFIG_HEAP_POISONING_COMPREHENSIVE=y
+# Comprehensive poisoning was tried and REMOVED: heap_caps_check_integrity()
+# does not report this heap as bad, it FAULTS inside verify_fill_pattern with a
+# CacheError - so the diagnostic turned a latent problem into a guaranteed panic
+# on every boot, and the device stopped booting at all. A measurement that
+# bricks the thing it measures is worse than no measurement.
+# CONFIG_HEAP_POISONING_COMPREHENSIVE is not set

@@ -1333,21 +1333,22 @@ static void heap_checkpoint(const char *stage)
     snprintf(s_rtc_stage, sizeof(s_rtc_stage), "%s", stage);
     s_rtc_stack_left = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
     s_rtc_magic = RTC_STAGE_MAGIC;
-    /* Which POOL is damaged? "all" cannot distinguish the internal heap from
-     * PSRAM, and the payload text is the one heap object this path touches -
-     * so knowing which of the two is corrupt separates "lint wrote out of
-     * bounds" from "something scribbled on external RAM". */
-    bool ok_int = heap_caps_check_integrity(MALLOC_CAP_INTERNAL, false);
-    bool ok_ext = heap_caps_check_integrity(MALLOC_CAP_SPIRAM, false);
-    bool ok = ok_int && ok_ext;
+    /* No integrity walk here.
+     *
+     * heap_caps_check_integrity() does not return false on a damaged heap - it
+     * faults inside it - so calling it every few lines of boot guaranteed a
+     * panic instead of reporting one. What is still worth recording costs
+     * nothing and cannot fail: how far boot got, and how much stack was left. */
+    bool ok_int = true, ok_ext = true, ok = true;
+    (void)ok_int; (void)ok_ext;
     if (s_heaplog_n < sizeof(s_heaplog) - 1) {
         int w = snprintf(s_heaplog + s_heaplog_n, sizeof(s_heaplog) - s_heaplog_n,
-                         "  %-14s internal=%-9s psram=%-9s stack_left=%u\n", stage,
-                         ok_int ? "ok" : "CORRUPT", ok_ext ? "ok" : "CORRUPT",
+                         "  %-14s reached, stack_left=%u\n", stage,
                          (unsigned)s_rtc_stack_left);
         if (w > 0 && (size_t)w < sizeof(s_heaplog) - s_heaplog_n) s_heaplog_n += (size_t)w;
     }
-    ESP_LOGW(TAG, "heap after %s: %s", stage, ok ? "ok" : "CORRUPT");
+    ESP_LOGW(TAG, "boot stage: %s (stack left %u)", stage, (unsigned)s_rtc_stack_left);
+    (void)ok;
     /* Deliberately does NOT write to the card here.
      *
      * Writing a diagnostic from the main task while the boot-log task is also
