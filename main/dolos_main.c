@@ -74,7 +74,13 @@ static dolos_config_t s_cfg;
 
 static char  s_names[MAX_PAYLOADS][64];
 static int   s_npayloads, s_sel;
-static char  s_payload_buf[6144];
+/* 6 KB was not a limit anyone had chosen; it was just the size of the buffer,
+ * and a bigger file was read up to it and NUL-terminated mid-line without a
+ * word. The script silently stopped halfway. 32 KB is comfortably inside the
+ * interpreter's own 64 KB ceiling and lives in PSRAM, and anything larger is
+ * now REFUSED with a reason instead of quietly half-run. */
+#define PAYLOAD_MAX 32768
+static EXT_RAM_BSS_ATTR char s_payload_buf[PAYLOAD_MAX];
 static const char *s_payload;
 static const char *s_payload_name = "demo";
 static int   s_total_lines, s_cur_line, s_last_lines;
@@ -114,6 +120,31 @@ static bool mode_is_idle(dui_mode_t m);
 static bool s_reload_pending;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+/* Adopt the host we actually detected, when the operator asked us to.
+ *
+ * s_cfg.os stays the single value everything reads - the player, the linter and
+ * the screen - so there is no second notion of "the real OS" to get out of step
+ * with the first. os_auto records that it was detected rather than chosen, and
+ * that is what gets written back to the card. Detection returning UNKNOWN
+ * changes nothing: the previous value stands. */
+static void load_selected(void);
+static void os_detect_apply(void)
+{
+    if (!s_cfg.os_auto || s_flash_mode) return;
+    usb_host_os_t d = usb_hid_detect_os();
+    target_os_t want;
+    switch (d) {
+        case USB_HOST_WINDOWS: want = OS_WINDOWS; break;
+        case USB_HOST_LINUX:   want = OS_LINUX;   break;
+        case USB_HOST_MAC:     want = OS_MAC;     break;
+        default: return;                       /* not enough evidence yet */
+    }
+    if (want == s_cfg.os) return;
+    ESP_LOGW(TAG, "host detected as %s (%s)", os_name(want), usb_hid_detect_why());
+    s_cfg.os = want;
+    load_selected();      /* the linter judges typability against the OS */
+}
 static void lock(void)   { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void unlock(void) { if (s_lock) xSemaphoreGive(s_lock); }
 
@@ -191,7 +222,24 @@ static void load_selected(void)
         FILE *fp = fopen(path, "r");
         if (fp) {
             int n = (int)fread(s_payload_buf, 1, sizeof(s_payload_buf) - 1, fp);
+            /* Is there MORE of the file than we just read? Half a payload that
+             * looks like a whole one is the worst outcome: it types a script
+             * that ends mid-line and reports success. */
+            int extra = fgetc(fp);
             fclose(fp);
+            if (extra != EOF) {
+                ESP_LOGE(TAG, "payload '%s' is larger than %d bytes - refusing to run half of it",
+                         s_names[s_sel], PAYLOAD_MAX);
+                s_payload = "REM payload too large for this device\n";
+                s_payload_name = s_names[s_sel];
+                s_total_lines = 1;
+                memset(&s_lint_first, 0, sizeof(s_lint_first));
+                s_lint_first.line = 1;
+                snprintf(s_lint_first.msg, sizeof(s_lint_first.msg),
+                         "payload is bigger than %d KB", PAYLOAD_MAX / 1024);
+                s_lint_problems = 1;      /* blocks arming, and says why */
+                return;
+            }
             if (n > 0) { s_payload_buf[n] = 0; s_payload = s_payload_buf;
                          s_payload_name = s_names[s_sel]; }
         }
@@ -714,6 +762,18 @@ static void ui_task(void *arg)
         if (g_wait_button && e != BTN_NONE) { g_wait_button = false; e = BTN_NONE; }
         uint32_t t = now_ms();
 
+        /* Re-check which machine we are plugged into.
+         *
+         * Throttled, and only while idle: adopting a new target OS re-lints the
+         * payload, which must never happen underneath a run. tud_mount_cb
+         * resets the evidence on every re-plug, so moving the device from a Mac
+         * to a PC is noticed without a reboot. */
+        static uint32_t last_detect;
+        if (t - last_detect > 250 && mode_is_idle(s_mode)) {
+            last_detect = t;
+            lock(); os_detect_apply(); unlock();
+        }
+
         /* admin-gated remote requests from the console (physical arming is
          * unchanged; remote fire only proceeds while remote_fire is enabled). */
         int rq = 0;
@@ -824,7 +884,7 @@ static void ui_task(void *arg)
             else if (t - stage_ms > ARMED_TMO_MS) { s_mode = DUI_SAFE; }
             break;
         case DUI_COUNTDOWN:
-            if (e == BTN_TAP) { s_mode = DUI_SAFE; break; }
+            if (e != BTN_NONE) { s_mode = DUI_SAFE; break; }   /* any press cancels */
             if (t - stage_ms >= COUNTDOWN_MS) {
                 s_abort = false; s_run_done = false; s_cur_line = 0; s_run_count++;
                 /* If the task cannot be created the payload never runs, and the
@@ -841,7 +901,14 @@ static void ui_task(void *arg)
             }
             break;
         case DUI_RUNNING:
-            if (e == BTN_TAP) s_abort = true;
+            /* ANY press stops it, not just a clean tap.
+             *
+             * Only BTN_TAP did, so someone trying to stop an injection by
+             * holding the button - which is what people actually do when they
+             * want something to stop NOW - was ignored, and a hold during a
+             * long WAIT looked like the device had frozen. A stop control must
+             * not be fussy about how it is pressed. */
+            if (e != BTN_NONE) s_abort = true;
             if (s_run_done) {
                 audit_write(s_abort);
                 s_mode = DUI_DONE; stage_ms = t;
@@ -1143,7 +1210,10 @@ void app_main(void)
      * which neither the screen nor the serial port can tell us once TinyUSB
      * owns the USB pins. */
     if (s_sd_ok) {
-        FILE *bf = fopen("/sdcard/DOLOS_BOOT.LOG", "a");
+        /* A DIFFERENT file from the opt-in boot log: that one holds a whole
+         * session of ESP_LOG output and is held open for the run, and two
+         * handles appending to one file interleave into nonsense. */
+        FILE *bf = fopen("/sdcard/DOLOS_RESET.LOG", "a");
         if (bf) {
             fprintf(bf, "boot: reason=%s crashes=%u safe=%d internal_free=%u largest=%u\n",
                     g_reset_reason, (unsigned)g_crashes, g_safe_boot ? 1 : 0,
