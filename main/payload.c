@@ -388,7 +388,19 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
     }
 
     const char *line;
-    while ((line = dscript_next(ds)) != NULL) {
+    for (;;) {
+        /* Feed the host's live state in before EVERY step.
+         *
+         * Nothing called this at all, so $_OS was always 0 (Windows) whatever
+         * the target really was, and every lock-key variable read 0 for ever -
+         * IF ($_OS == MAC) could not be true on a Mac, and a payload that waits
+         * for CAPS LOCK and then reports it printed a stale zero. It has to be
+         * refreshed per step rather than set once: dscript_init() zeroes the
+         * struct, and the whole point of these is that they are current. */
+        dscript_set_host(ds, (int32_t)ctx->os, usb_hid_leds(), g_wait_button ? 0 : 1);
+        dscript_set_host_usb(ds, usb_hid_mounted() ? 1 : 0, usb_hid_leds() ? 1 : 0);
+        line = dscript_next(ds);
+        if (line == NULL) break;
         if (ctx->abort && *ctx->abort) break;
         cur++;
         if (ctx->progress) ctx->progress(cur, total, ctx->user);

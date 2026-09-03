@@ -366,4 +366,23 @@ TEST_MAIN_BEGIN
                      "the macro was substituted: '%s'", l);
         CHECK(dscript_error(&ds) == NULL, "and nothing failed");
     }
+
+    SUITE("STRING prints the VALUE of a system variable, not its name");
+    {
+        /* IF ($_CAPSLOCK_ON) always worked; printing it typed "$_CAPSLOCK_ON". */
+        dscript_t *ds = dscript_alloc();
+        CHECK(ds != NULL, "allocated");
+        CHECK(dscript_init(ds, "STRING os=$_OS caps=$_CAPSLOCK_ON num=$_NUMLOCK_ON\n"),
+              "payload parses");
+        /* AFTER init: init zeroes the struct, so host state set before it is
+         * thrown away. The firmware got this wrong by never calling it at all. */
+        dscript_set_host(ds, 2 /* mac */, 0x02 /* caps on */, 0);
+        const char *l = dscript_next(ds);
+        CHECK(l != NULL, "a line came back");
+        CHECK(l && strstr(l, "os=2") != NULL, "the OS code is substituted, got: %s", l ? l : "(null)");
+        CHECK(l && strstr(l, "caps=1") != NULL, "caps lock reads as on, got: %s", l ? l : "(null)");
+        CHECK(l && strstr(l, "num=0") != NULL, "num lock reads as off, got: %s", l ? l : "(null)");
+        CHECK(l && strstr(l, "$_") == NULL, "no variable NAME survives into the text");
+        free(ds);
+    }
 TEST_MAIN_END

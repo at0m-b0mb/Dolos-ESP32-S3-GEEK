@@ -560,9 +560,19 @@ static bool expand_vars(dscript_t *ds, const char *in, char *out, size_t cap)
             const char *q = p + 1;
             while ((isalnum((unsigned char)*q) || *q == '_') && n < sizeof(name) - 1) name[n++] = *q++;
             name[n] = 0;
+            /* User variables first, then the $_ system variables.
+             *
+             * This only ever asked the user table, so IF ($_CAPSLOCK_ON) worked
+             * - expressions resolve them separately - while
+             * STRING caps lock: $_CAPSLOCK_ON typed the NAME. A payload that
+             * reports what it found on the host is the whole point of the
+             * return channel, and it printed placeholders instead. */
+            int32_t val; bool have = false;
             int i = var_index(ds, name);
-            if (i >= 0) {
-                int w = snprintf(out + o, cap - o, "%ld", (long)ds->var[i].val);
+            if (i >= 0)                        { val = ds->var[i].val; have = true; }
+            else if (sys_var(ds, name, &val))  { have = true; }
+            if (have) {
+                int w = snprintf(out + o, cap - o, "%ld", (long)val);
                 if (w < 0 || (size_t)w >= cap - o) { out[cap - 1] = 0; return false; }
                 o += (size_t)w;
                 p = q;
