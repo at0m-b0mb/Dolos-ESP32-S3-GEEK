@@ -17,3 +17,7 @@ test/host/out/
 # hardening: never commit the Secure Boot signing key
 secure_boot_signing_key.pem
 sdkconfig.hardening
+
+# archived images, kept so a core dump can be decoded against what was flashed
+.flashed/
+.preview/

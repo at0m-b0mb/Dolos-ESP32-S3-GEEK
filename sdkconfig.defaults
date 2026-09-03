@@ -57,6 +57,10 @@ CONFIG_TINYUSB_MSC_ENABLED=y
 # the core dump caught esp_timer smashing its own stack inside
 # esp_psram_check_ptr_addr with a poisoned return frame.
 CONFIG_ESP_TIMER_TASK_STACK_SIZE=6144
+# app_main mounts the card, parses the config, lints the selected payload and
+# brings up USB and the radio, all on this one stack. The default 3584 left no
+# margin at all for the deepest of those calls.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 
 # --- crash evidence -------------------------------------------------------
 # These MUST live here and not only in the generated sdkconfig.

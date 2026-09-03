@@ -105,7 +105,15 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
      * that reach this call emit a handful of actions at most (STRING and the
      * delays are handled above). 32 is ample and keeps 2.5 KB off the caller's
      * stack - lint runs on the UI task and on the console's HTTP task. */
-    ducky_action_t acts[32];
+    /* Static, like the line buffer below and for the same reason.
+     *
+     * acts[32] is 1920 bytes and fname is another 768: nearly 2.7 KB of stack
+     * for a function called at BOOT from app_main, whose task stack is 3584
+     * bytes in total. That is an overflow waiting for a slightly deeper call
+     * chain, and a stack overflow looks like a mystery panic with a healthy
+     * heap - which is exactly what it looked like. One linter runs at a time
+     * (every caller holds the app lock), so these cost nothing to share. */
+    static ducky_action_t acts[32];
     /* Static, and deliberately so: 8 KB of line buffer plus a ducky_state_t
      * cannot sit on the stack of the UI task. Every caller of ducky_lint()
      * holds the app lock, so there is one linter at a time. */
@@ -134,7 +142,7 @@ int ducky_lint(const char *text, kb_layout_t layout, target_os_t os,
      * Rolling_Powershell_Execution() and then calls it is calling something
      * perfectly real, and the linter has to know that before it judges the
      * call site. */
-    char fname[24][32]; int nfn = 0;
+    static char fname[24][32]; int nfn = 0;
     for (const char *q = p; *q && nfn < 24; ) {
         const char *e2 = q; while (*e2 && *e2 != '\n') e2++;
         const char *t = q; while (*t == ' ' || *t == '\t') t++;
