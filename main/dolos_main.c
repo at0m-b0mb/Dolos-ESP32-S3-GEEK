@@ -148,6 +148,7 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
  * that is what gets written back to the card. Detection returning UNKNOWN
  * changes nothing: the previous value stands. */
 static void load_selected(void);
+static void ensure_checked(void);
 static void heap_checkpoint(const char *stage);
 static bool sd_mount(void);
 static void scan_payloads(void);
@@ -268,6 +269,36 @@ static void scan_payloads(void)
  * came up in safe boot. */
 static void engine_yield(void) { vTaskDelay(1); }
 
+/* Which selection the expensive check was last done for. -1 = none. */
+static int s_checked_sel = -1;
+
+/* Read and lint the selected payload, unless that was already done for this
+ * selection. Called where a verdict is genuinely needed - before arming - and
+ * nowhere else, so cycling the list costs nothing. */
+static void ensure_checked(void)
+{
+    if (s_checked_sel == s_sel && s_total_lines > 0) return;
+    load_selected();
+}
+
+/* Choosing a payload is FREE.
+ *
+ * Reading and linting a script is the most expensive thing this device does,
+ * and it was being done on every selection - every button tap while cycling
+ * the list, from the UI task, above the priority of the task the watchdog
+ * watches. Selecting is now just a name; the work happens once, when it
+ * matters, and is remembered. */
+static void select_payload(int i)
+{
+    if (i < 0 || i >= s_npayloads) return;
+    s_sel = i;
+    s_payload_name = s_names[i];
+    s_checked_sel = -1;                  /* unknown, not "clean" */
+    s_total_lines = 0;
+    s_lint_problems = 0;
+    memset(&s_lint_first, 0, sizeof(s_lint_first));
+}
+
 static void load_selected(void)
 {
     /* NEVER rewrite the buffer the payload task is reading.
@@ -350,6 +381,7 @@ static void load_selected(void)
         ESP_LOGW(TAG, "linting '%s' (%d lines) took %lums",
                  s_payload_name, s_total_lines, (unsigned long)lint_ms);
     heap_checkpoint("lint_end");
+    s_checked_sel = s_sel;
     if (s_lint_problems > 0)
         ESP_LOGW(TAG, "payload '%s' has %d problem(s); first at line %d: %s (arming blocked)",
                  s_payload_name, s_lint_problems, s_lint_first.line, s_lint_first.msg);
@@ -803,7 +835,8 @@ bool bridge_remote_select(const char *name)
      * mixture of two payloads. */
     if (!mode_is_idle(s_mode)) { unlock(); return false; }
     bool ok = false;
-    for (int i = 0; i < s_npayloads; i++) if (strcmp(s_names[i], name) == 0) { s_sel = i; load_selected(); ok = true; break; }
+    for (int i = 0; i < s_npayloads; i++)
+        if (strcmp(s_names[i], name) == 0) { select_payload(i); ok = true; break; }
     unlock(); return ok;
 }
 bool bridge_remote_fire_enabled(void) { return g_remote_fire_enabled; }
@@ -822,8 +855,8 @@ arm_result_t bridge_remote_arm(void)
      * itself a few seconds later. Refusing to arm from it meant the console
      * said "refused" for several seconds after every single run, with no
      * explanation - so it counts as idle here. */
-    if (s_lint_problems > 0)                            rc = ARM_ERR_LINT;
-    else if (!mode_is_idle(s_mode))                     rc = ARM_ERR_BUSY;
+    if (!mode_is_idle(s_mode))                          rc = ARM_ERR_BUSY;
+    else if ((ensure_checked(), s_lint_problems > 0))   rc = ARM_ERR_LINT;
     else { g_remote_req = 1; rc = ARM_OK; }
     unlock();
     return rc;
@@ -991,10 +1024,12 @@ static void ui_task(void *arg)
                  * payload text and the lint verdict - and that verdict is what
                  * decides whether the device is allowed to arm. */
                 lock();
-                s_sel = (s_sel + 1) % s_npayloads; load_selected();
+                select_payload((s_sel + 1) % s_npayloads);
                 unlock();
             }
-            else if (e == BTN_HOLD && !s_flash_mode && s_lint_problems == 0) {
+            else if (e == BTN_HOLD && !s_flash_mode) {
+                lock(); ensure_checked(); unlock();
+                if (s_lint_problems != 0) break;      /* the screen says why */
                 if (s_cfg.arm_pin[0]) { s_mode = DUI_PINENTRY; s_pin_pos = 0; s_pin_cur = 1; stage_ms = t; }
                 else                  { s_mode = DUI_ARMED; stage_ms = t; }
             }
