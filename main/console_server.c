@@ -147,6 +147,14 @@ static int read_body(httpd_req_t *r, char *buf, size_t cap)
     return (int)off;
 }
 
+static int hexval(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 /* minimal url-decode form value: key=...&... */
 static bool form_val(const char *body, const char *key, char *out, size_t cap)
 {
@@ -157,7 +165,21 @@ static bool form_val(const char *body, const char *key, char *out, size_t cap)
             const char *v = p + kl + 1; size_t o = 0;
             while (*v && *v != '&' && o < cap - 1) {
                 if (*v == '%' && v[1] && v[2]) {
-                    char h[3] = { v[1], v[2], 0 }; out[o++] = (char)strtol(h, NULL, 16); v += 3;
+                    /* strtol() returned 0 for anything that was not hex, so
+                     * "%zz" wrote a NUL into the middle of the value and
+                     * silently truncated it - "secret%zzmore" was accepted as
+                     * "secret", and two different inputs became one password.
+                     * Decode only real escapes; drop an encoded NUL rather than
+                     * embedding one; otherwise take the '%' literally. */
+                    int hi = hexval(v[1]), lo = hexval(v[2]);
+                    if (hi >= 0 && lo >= 0) {
+                        int ch = (hi << 4) | lo;
+                        v += 3;
+                        if (ch == 0) continue;          /* never embed a NUL */
+                        out[o++] = (char)ch;
+                    } else {
+                        out[o++] = *v++;                /* a literal percent */
+                    }
                 } else if (*v == '+') { out[o++] = ' '; v++; }
                 else out[o++] = *v++;
             }
@@ -172,11 +194,24 @@ static bool cookie_sid(httpd_req_t *r, char *out, size_t cap)
 {
     char c[256];
     if (httpd_req_get_hdr_value_str(r, "Cookie", c, sizeof(c)) != ESP_OK) return false;
-    char *p = strstr(c, "sid=");
-    if (!p) return false;
-    p += 4; size_t o = 0;
-    while (*p && *p != ';' && *p != ' ' && o < cap - 1) out[o++] = *p++;
-    out[o] = 0; return o == 32;
+    /* Match the cookie NAME at a boundary.
+     *
+     * strstr(c, "sid=") also matched "mysid=" or "xsid=", so an unrelated
+     * cookie whose name merely ended in "sid" would be read as the session
+     * token - and the real one ignored. Walk the header properly instead. */
+    for (const char *p = c; *p; ) {
+        while (*p == ' ' || *p == ';') p++;
+        if (strncmp(p, "sid=", 4) == 0) {
+            p += 4; size_t o = 0;
+            while (*p && *p != ';' && *p != ' ' && o < cap - 1) out[o++] = *p++;
+            out[o] = 0;
+            return o == 32;
+        }
+        const char *nxt = strchr(p, ';');
+        if (!nxt) break;
+        p = nxt + 1;
+    }
+    return false;
 }
 
 /* Resolve session + enforce permission (+ CSRF for state changes). Sends the

@@ -1160,14 +1160,48 @@ static void ui_task(void *arg)
         st.admin_pw = g_wifi_up ? (g_admin_pw_show[0] ? g_admin_pw_show : s_cfg.admin_pass) : NULL;
         st.countdown = 3 - (int)((t - stage_ms) / 1000);
         if (st.countdown < 1) st.countdown = 1;
-        st.anim++;
+        /* st.anim is not read by the renderer, so leave it alone: bumping it
+         * would make every frame differ and defeat the check below. */
 
-        if (cv) {
+        /* Draw only when something actually changed.
+         *
+         * The UI ran at 20 Hz and re-rendered the whole canvas every tick, then
+         * compared 135 rows against the shadow to discover that nothing had
+         * moved. Both buffers are in PSRAM, so an idle device was pushing
+         * roughly 190 KB of external-RAM traffic twenty times a second, for
+         * nothing - competing with the payload text and the interpreter for the
+         * same slow memory.
+         *
+         * dui_state_t holds POINTERS to strings that can change underneath an
+         * unchanged pointer - the lint message and the payload name both do -
+         * so the struct alone is not enough to compare. Hash what those point
+         * at, and the live settings the menu screen draws, and skip the frame
+         * only when all of it matches. A few hundred bytes hashed against
+         * 190 KB moved is a trade worth making. */
+        uint32_t sig = 2166136261u;
+        {
+            const char *vol[] = { st.payload_name, st.lint_msg, st.run_fail_msg,
+                                  st.wifi_ssid, st.wifi_key, st.admin_pw,
+                                  st.admin_user, st.layout, st.speed };
+            for (unsigned i = 0; i < sizeof(vol) / sizeof(vol[0]); i++)
+                for (const char *q = vol[i]; q && *q; q++) {
+                    sig ^= (uint8_t)*q; sig *= 16777619u;
+                }
+            const uint8_t *cb = (const uint8_t *)&s_cfg;   /* the menu draws these */
+            for (size_t i = 0; i < sizeof(s_cfg); i++) { sig ^= cb[i]; sig *= 16777619u; }
+            sig ^= (uint32_t)s_confirm; sig *= 16777619u;
+        }
+        static dui_state_t prev_st;
+        static uint32_t    prev_sig;
+        static bool        drawn_once;
+        if (cv && (!drawn_once || sig != prev_sig ||
+                   memcmp(&st, &prev_st, sizeof(st)) != 0)) {
             if (s_confirm != MENU_ACT_NONE)
                 dui_render_notice(cv, s_confirm_t1, s_confirm_t2, s_confirm_t3);
             else
                 dui_render(cv, &st);
             display_flush();
+            prev_st = st; prev_sig = sig; drawn_once = true;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
