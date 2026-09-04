@@ -220,7 +220,12 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
              * a host that never answers. */
             const uint8_t start = usb_hid_leds();
             uint32_t waited = 0;
-            const uint32_t limit = 30000;
+            /* If the host has never once sent lock-key state, it is not going
+             * to start now - macOS does not send it at all. Waiting the full
+             * thirty seconds for an answer that cannot come just looks like the
+             * device has hung. Give it a moment in case the first report is
+             * merely late, then move on and say so. */
+            const uint32_t limit = usb_hid_saw_led_report() ? 30000 : 1500;
             while (waited < limit && !(ctx->abort && *ctx->abort)) {
                 uint8_t now = usb_hid_leds();
                 bool bit = (now & a2->wait_mask) != 0;
@@ -230,9 +235,11 @@ static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
                 vTaskDelay(pdMS_TO_TICKS(20));
                 waited += 20;
             }
-            ilog_note("  WAIT_FOR mask=0x%02X want=%u -> %s after %lums\n",
+            ilog_note("  WAIT_FOR mask=0x%02X want=%u -> %s after %lums%s\n",
                       a2->wait_mask, a2->wait_want,
-                      waited >= limit ? "TIMED OUT" : "satisfied", (unsigned long)waited);
+                      waited >= limit ? "TIMED OUT" : "satisfied", (unsigned long)waited,
+                      usb_hid_saw_led_report() ? ""
+                        : " (this host has never sent lock-key state)");
             continue;
         }
         if (a2->kind == DUCKY_SPECIAL) {
@@ -413,7 +420,12 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
          * refreshed per step rather than set once: dscript_init() zeroes the
          * struct, and the whole point of these is that they are current. */
         dscript_set_host(ds, (int32_t)ctx->os, usb_hid_leds(), g_wait_button ? 0 : 1);
-        dscript_set_host_usb(ds, usb_hid_mounted() ? 1 : 0, usb_hid_leds() ? 1 : 0);
+        /* $_RECEIVED_HOST_LOCK_LED_REPLY: whether the host has EVER sent lock-key
+         * state, not whether a light happens to be on. macOS never sends it, so a
+         * payload can test this and take the other branch instead of trusting a
+         * caps-lock reading that cannot be true. */
+        dscript_set_host_usb(ds, usb_hid_mounted() ? 1 : 0,
+                             usb_hid_saw_led_report() ? 1 : 0);
         line = dscript_next(ds);
         if (line == NULL) break;
         if (ctx->abort && *ctx->abort) break;
