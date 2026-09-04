@@ -364,4 +364,26 @@ TEST_MAIN_BEGIN
               a[0].consumer == 0xE2, "MEDIA_MUTE alone");
         CHECK(ducky_parse_line(&st, "MEDIA BANANA", a, 8) == 0, "an unknown media key is still rejected");
     }
+
+    SUITE("caret keys settle before the next character is typed");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        ducky_action_t a[8];
+        /* "abcdef" LEFT LEFT LEFT "-" END produced "abc-" with the "def"
+         * arriving at the end of the document: the caret had not finished
+         * moving. Each caret key now carries its own settle. */
+        int n = ducky_parse_line(&st, "LEFT", a, 8);
+        CHECK(n == 2 && a[0].key == HID_KEY_LEFT, "LEFT is the key...");
+        CHECK(n == 2 && a[1].kind == DUCKY_DELAY && a[1].delay_ms > 0,
+              "...followed by a settle");
+        n = ducky_parse_line(&st, "DELETE", a, 8);
+        CHECK(n == 2 && a[1].kind == DUCKY_DELAY, "DELETE settles too");
+        n = ducky_parse_line(&st, "END", a, 8);
+        CHECK(n == 2 && a[1].kind == DUCKY_DELAY, "END settles too");
+        /* an ordinary character must NOT gain one */
+        n = ducky_parse_line(&st, "SPACE", a, 8);
+        CHECK(n == 1, "SPACE is still a single action");
+        n = ducky_parse_line(&st, "ENTER", a, 8);
+        CHECK(n == 1, "ENTER is still a single action");
+    }
 TEST_MAIN_END

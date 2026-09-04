@@ -482,6 +482,16 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
         return 1;
     }
 
+    /* Cursor and editing keys need the host to catch up.
+     *
+     * ARROW keys, HOME/END, DELETE and BACKSPACE move a caret and reflow text,
+     * which the receiving application does asynchronously. Typing the next
+     * character before it has finished puts that character somewhere else -
+     * "abcdef" then LEFT LEFT LEFT then "-" produced "abc-" with the "def"
+     * arriving at the end of the document. Everything else on the line was
+     * perfect, which is what a caret race looks like rather than a lost
+     * keystroke. A few milliseconds costs nothing and removes it. */
+
     /* Otherwise: a key chord. Walk every token; modifiers OR together, the last
      * named key or single character is the key. "GUI r", "CTRL ALT DELETE". */
     uint8_t mods = 0, key = 0; bool have_key = false, invalid = false;
@@ -522,5 +532,15 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
     if (invalid) return 0;
     if (!have_key && mods == 0) return 0;
     out[0].kind = DUCKY_KEY; out[0].mods = mods; out[0].key = key; out[0].delay_ms = 0;
+    /* A caret move gets a settle of its own, emitted as a second action. */
+    if (!mods && max > 1 &&
+        (key == HID_KEY_LEFT || key == HID_KEY_RIGHT || key == HID_KEY_UP ||
+         key == HID_KEY_DOWN || key == HID_KEY_HOME || key == HID_KEY_END ||
+         key == HID_KEY_DELETE || key == HID_KEY_BSPACE ||
+         key == HID_KEY_PGUP || key == HID_KEY_PGDN)) {
+        memset(&out[1], 0, sizeof(out[1]));
+        out[1].kind = DUCKY_DELAY; out[1].delay_ms = 12;
+        return 2;
+    }
     return 1;
 }

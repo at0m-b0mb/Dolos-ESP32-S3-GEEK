@@ -185,6 +185,41 @@ static void draw_fit(canvas_t *cv, int x, int y, const char *s,
  * miserable, so the credentials are encoded as a standard Wi-Fi QR (the same
  * "WIFI:" URI Android and iOS cameras understand) and the text beside it is
  * drawn at double size to be legible at arm's length. */
+/* A credential, as large as it can be read, wrapped rather than shrunk.
+ *
+ * A 16-character key does not fit the column beside the QR at double size, so
+ * it fell back to the smallest font and became unreadable at arm's length -
+ * which defeats the point of showing it at all. Splitting it across two rows
+ * keeps every character twice the size. Returns the y below what it drew. */
+static int draw_cred(canvas_t *cv, int x, int y, const char *v, uint16_t col, int maxw)
+{
+    /* Never draw into or past the footer. A credential that runs off the panel
+     * is worse than a small one: you cannot tell it was cut. */
+    const int floor_y = H - 13;
+    if (y + 8 > floor_y) return y;
+    if (!v || !*v) { cv_text(cv, x, y, "-", col, -1, 2); return y + 17; }
+    int per = maxw / ((FONT5X8_W + 1) * 2);          /* characters per row at 2x */
+    if (per < 1) per = 1;
+    int len = (int)strlen(v);
+    if (len <= per) { cv_text(cv, x, y, v, col, -1, 2); return y + 17; }
+    /* Two rows at double size beat one row too small to read. */
+    /* Two rows, split as evenly as the width allows. */
+    int half = (len + 1) / 2;
+    if (half > per) half = per;
+    char row[24];
+    int n = half < (int)sizeof(row) - 1 ? half : (int)sizeof(row) - 1;
+    memcpy(row, v, (size_t)n); row[n] = 0;
+    cv_text(cv, x, y, row, col, -1, 2);
+    if (y + 16 + 16 > floor_y) return y + 17;      /* no room for a second row */
+    const char *rest = v + n;
+    int m = (int)strlen(rest);
+    if (m > per) m = per;                          /* clip, never overflow the column */
+    if (m > (int)sizeof(row) - 1) m = (int)sizeof(row) - 1;
+    memcpy(row, rest, (size_t)m); row[m] = 0;
+    cv_text(cv, x, y + 16, row, col, -1, 2);
+    return y + 33;
+}
+
 static void draw_info(canvas_t *cv, const dui_state_t *st)
 {
     if (!st->wifi_on) {
@@ -273,10 +308,14 @@ static void draw_info(canvas_t *cv, const dui_state_t *st)
      * and clip to the column either way - a value that runs off the panel is
      * worse than a small one, because you cannot tell it was truncated. */
     int tx = qx, tw = W - tx - 4;
-    cv_text(cv, tx, 18, "NETWORK", DU_DIM, -1, 1);
-    draw_fit(cv, tx, 27, st->wifi_ssid ? st->wifi_ssid : "-", DU_SAFE, tw);
-    cv_text(cv, tx, 47, "KEY", DU_DIM, -1, 1);
-    draw_fit(cv, tx, 56, st->wifi_key ? st->wifi_key : "-", DU_INK, tw);
+    /* Tight, because a wrapped key needs two rows and the console password
+     * needs two more. Truncating either is not an option: a credential you
+     * cannot read in full is the same as no credential at all. */
+    int y = 16;                       /* the header band ends at 15 */
+    cv_text(cv, tx, y, "NETWORK", DU_DIM, -1, 1); y += 8;
+    y = draw_cred(cv, tx, y, st->wifi_ssid, DU_SAFE, tw);
+    cv_text(cv, tx, y, "KEY", DU_DIM, -1, 1); y += 8;
+    y = draw_cred(cv, tx, y, st->wifi_key, DU_INK, tw);
     {
         /* The reveal hint rides on the LOGIN label rather than getting a row of
          * its own: the row below is the console URL, and putting both there
@@ -285,17 +324,21 @@ static void draw_info(canvas_t *cv, const dui_state_t *st)
         snprintf(who, sizeof(who), "LOGIN  %s%s",
                  st->admin_user ? st->admin_user : "admin",
                  st->admin_pw_masked ? "   HOLD=SHOW" : "");
-        draw_fit_scale1(cv, tx, 76, who, DU_DIM, tw);
+        draw_fit_scale1(cv, tx, y, who, DU_DIM, tw); y += 8;
     }
     if (st->admin_pw_masked) {
         /* Someone has already logged in with this password, so it has served
          * its purpose; leaving it on screen hands console control to whoever
          * picks the device up. HOLD brings it back when it is needed. */
-        draw_fit(cv, tx, 85, "********", DU_DIM, tw);
+        draw_fit(cv, tx, y, "********", DU_DIM, tw);
     } else {
-        draw_fit(cv, tx, 85, st->admin_pw ? st->admin_pw : "-", DU_ARMED, tw);
+        y = draw_cred(cv, tx, y, st->admin_pw, DU_ARMED, tw);
     }
-    draw_fit_scale1(cv, tx, 106, "http://192.168.4.1", DU_DIM, tw);
+    /* The address is also in the QR and on the console itself, so it gets
+     * whatever room is left rather than a reserved row. */
+    /* The address is in the QR and on the console itself, so it only appears
+     * when the credentials have left room for it. */
+    if (y + 8 < H - 13) cv_text(cv, tx, H - 21, "http://192.168.4.1", DU_DIM, -1, 1);
 }
 
 void dui_render(canvas_t *cv, const dui_state_t *st)
