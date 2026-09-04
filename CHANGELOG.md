@@ -2,11 +2,11 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
-## [0.8.0] - 2026-09-02
-A line-by-line audit of the whole codebase, and a boot crash tracked down with
-the core dump rather than guessed at. Nothing here is a feature; all of it is
-the difference between a device that mostly works and one you can hand to
-someone else.
+## [0.8.0] - 2026-09-04
+Everything here came from running the firmware on a real board against a real
+Mac. Most of it could not have been found any other way: the host tests were
+green throughout, and several of these bugs were invisible to them by
+construction.
 
 ### The test suite had never run in CI
 
@@ -17,53 +17,126 @@ only that the sources compile as ISO C. Setting `.DEFAULT_GOAL` surfaced a real
 regression the suite had been holding all along. This is the most consequential
 fix in the release: the safety net was disconnected.
 
+### A 24 KB stack frame on a 6 KB task
+
+The device froze and was reset by the watchdog whenever a payload with enough
+control flow was armed. Measured rather than guessed:
+
+| function | stack |
+|---|---|
+| `dscript_next` | 16,496 bytes |
+| `match_end` (called from it) | 8,256 bytes |
+| `dscript_init` | 8,368 bytes |
+
+About 24.7 KB against a 6,144-byte task. Five line-sized buffers were locals;
+they now live in the interpreter struct on the PSRAM heap. `dscript_next` went
+from 16,496 bytes to 192. The button dying before the reset was the UI task
+being destroyed first.
+
+### Quad PSRAM at 80 MHz
+
+The device boot-looped whenever one particular 16 KB payload was on the card,
+and did so on a firmware build that had previously been seen working - which is
+what proved the code was not the variable. Quad PSRAM at 80 MHz shares tight SPI
+timing with the flash on this part. It explained every fact that had no other
+explanation: only the one payload large enough to drive sustained PSRAM reads,
+never reproducible on the host at any stack size, independent of firmware
+version, and surfacing as damage in unrelated places - a heap block header
+holding -8, a newlib FILE lock reading NULL, a fault inside `tlsf_malloc`.
+Now 40 MHz.
+
 ### Silent failures, which are worse than crashes
 
-- **A STRING longer than 192 characters typed 192 characters and dropped the
-  rest** without a word - and long one-liners are exactly what real payloads
-  type. Any length now types in full, continued across passes.
-- **`HOLD SPACE` pressed nothing.** Only the modifier byte was ever sent, so
-  holding a normal key parsed perfectly and did nothing.
+- **A STRING over 192 characters typed 192 characters and dropped the rest** in
+  silence. Any length now types in full, continued across passes.
+- **`HOLD SPACE` pressed nothing** - only the modifier byte was ever sent.
 - **`CTRL +` sent the wrong key**, dropping the shift that produces `+`.
-- **`F13`-`F24` invalidated the whole line** despite being real HID usages.
+- **`ELSE IF` chains ran the wrong branch.** A false `IF` jumped past the next
+  `ELSE`, which for `ELSE IF` is its BODY, so the condition was never evaluated:
+  with four branches every value from the third onwards took the second.
+- **`F13`-`F24` and `MEDIA VOLUME_UP` were rejected** as invalid.
 - **The uplink, boot-log and storage settings were parsed but never written**,
-  so they vanished at the next power cycle. The upstream Wi-Fi password was
-  persisted nowhere at all; it now lives in NVS beside the others.
-- **An over-long config line could invent a second setting**, because the parser
-  resumed in the middle of it.
-- **A rejected payload said "PAYLOAD PRODUCED NO KEYSTROKES"** while the parser
-  knew the exact line and reason.
+  so they vanished at the next power cycle.
+- **A bare `STRING` swallows the rest of a payload** as literal text; the linter
+  now reports an unclosed block.
 
-### Safety and correctness
+### Memory
 
-- **The stop button was ignored during `DELAY`.** A payload containing
-  `DELAY 20000` kept typing rights over the operator for twenty seconds after
-  they pressed stop. Delays now sleep in slices and return immediately.
-- **A race on the lint verdict that gates arming.** The UI task reloaded and
-  re-linted payloads without the app lock while the console task did so under
-  it, and `ducky_lint()` keeps an 8 KB buffer and a parser as statics.
-- **Sleeping inside a Wi-Fi event handler** blocked the shared system event task
-  for three seconds at a time on every failed join.
-- **A NULL label panicked the device from the display path.**
-- **Login timing revealed which usernames exist** - an unknown name returned at
-  once, a known one paid for 20,000 PBKDF2 rounds.
-- `HID_KEY_MENU` was `0x65` here and `0x76` in TinyUSB: one name, two values,
-  resolved by include order.
+Three separate 31 KB interpreters existed, one of them a static inside the
+linter - in internal RAM, the pool the radio, USB and SD driver compete for.
+They share one instance now, and the engine's buffers are placed by rule: hot
+data touched per character stays in fast internal RAM, bulk data read once goes
+external. 69 KB returned to internal RAM.
 
-### The boot crash
+Filesystem reads no longer land in PSRAM (the SD driver is DMA-driven), FATFS
+no longer allocates a long-filename buffer on every operation, and the payload
+buffer is refused rather than silently truncated when a script is too large.
 
-Four crashes in a row on boot with the radio on; a clean boot in safe boot, the
-one mode that does not start the radio. The core dump named the `esp_timer` task
-with `exccause 0x47` (CacheError) and a wild PC - a cache-disabled access, not
-an allocation failure. Two PSRAM settings sat at their IDF defaults and were
-never pinned: task stacks were allowed in PSRAM (unusable whenever an NVS commit
-turns the cache off), and only 32 KB of internal RAM was reserved for the radio,
-TinyUSB and the SD card to share. Both are now pinned, and the free internal
-heap is logged either side of Wi-Fi bring-up.
+### Speed
 
-### Tests
+- The UI redrew the whole canvas 20 times a second to discover nothing had
+  changed - about 190 KB of PSRAM traffic per second while idle. It now draws
+  only on change.
+- The injection log flushed to the SD card **between every keystroke**. That was
+  a card transaction in the middle of typing, and removing it fixed a block of
+  characters that had been arriving out of order.
+- Selecting a payload no longer reads and lints it. That happens once, when
+  arming, and is remembered - so a list of any size scrolls instantly.
+- A long parse yields every 32 lines, so it cannot starve the watchdog.
 
-13 suites, all of them now actually executed, covering every fix above.
+### macOS
+
+- **Accented text works.** The Option+hex method needs a keyboard layout nobody
+  has selected; macOS types these with Option on the ordinary US keyboard.
+  45 accented characters and 27 symbols.
+- **The OS is detected**, not configured, from how the host enumerates the
+  device. `os=auto` is the default.
+- **The device no longer presses your CAPS LOCK before every run.** A readiness
+  handshake tapped it and waited for an echo that macOS never sends, which
+  shredded the opening lines of every payload.
+- Caret keys (`LEFT`, `HOME`, `DELETE`, ...) settle before the next character,
+  because the application reflows text asynchronously.
+
+### Security
+
+- **The upstream Wi-Fi password leaked.** It was neither redacted when the
+  console displayed the config nor stripped when the console wrote it to the
+  card. Secrets are now identified by rule, so a field added later is protected
+  by default rather than by remembering.
+- The session cookie was matched with a substring search, so `mysid=` would be
+  read as `sid=`.
+- Percent-decoding turned `%zz` into a NUL, silently truncating values and
+  mapping two different inputs onto one password.
+- Login no longer reveals which usernames exist through timing.
+- Every response carries `no-store`, `X-Frame-Options: DENY` and
+  `frame-ancestors 'none'` - a hidden frame could otherwise trick an
+  authenticated operator into clicking "arm and fire".
+- The Wi-Fi SSID is random and stored, not derived from the MAC address.
+
+### Console
+
+Three-way theme (auto/light/dark), a header that does not collapse on a phone,
+a real logo, credentials wrapped at double size rather than shrunk to
+illegibility, a QR with a proper quiet zone, and a page refresh no longer
+throws away a live session.
+
+### Diagnostics
+
+Core dumps are pinned in `sdkconfig.defaults` - they had been switched off by a
+config regeneration, so a run of real panics left nothing to read. `flash.sh`
+archives the exact image it flashed, because a dump can only be decoded against
+the binary that produced it. Every boot appends its reset reason and free heap
+to the card.
+
+### Known limitations
+
+- **macOS never sends keyboard LED state to this device**, so `$_CAPSLOCK_ON`
+  and `WAIT_FOR_CAPS_CHANGE` cannot work there. The device now reports this
+  honestly through `$_RECEIVED_HOST_LOCK_LED_REPLY` and stops waiting for an
+  answer that will not come, instead of reporting a confident 0. Windows and
+  Linux are unaffected.
+- PSRAM runs at 40 MHz rather than 80. Correctness first; revisit only with
+  evidence that 80 MHz is stable on this board.
 
 ## [0.7.0] - 2026-08-29
 Hardware brought the truth. This release is what a day of running the firmware
