@@ -27,14 +27,29 @@ static const uint8_t s_hid_report[] = {
  * cannot be added after enumeration - what changes at run time is whether the
  * drive reports a medium. Until a payload asks for storage the host is told the
  * slot is empty, so it shows nothing and mounts nothing. */
-#define DOLOS_CFG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_MSC_DESC_LEN)
+/* HID uses the IN-and-OUT descriptor: it is seven bytes longer because of the
+ * second endpoint, and the config total length must say so or the host reads a
+ * truncated configuration. */
+#define DOLOS_CFG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN + TUD_MSC_DESC_LEN)
 #define ITF_NUM_HID  0
 #define ITF_NUM_MSC  1
 static const uint8_t s_config[] = {
     TUD_CONFIG_DESCRIPTOR(1, 2, 0, DOLOS_CFG_TOTAL_LEN,
                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 4, HID_ITF_PROTOCOL_NONE, sizeof(s_hid_report),
-                       0x81, 16, 1),
+    /* An interrupt OUT endpoint, so the host can actually SEND us the lock-key
+     * LED state.
+     *
+     * The interface had an IN endpoint only. The report descriptor declared the
+     * LED output all along, but with no OUT pipe the only route left was a
+     * control SET_REPORT - and macOS drives keyboard LEDs over the interrupt
+     * endpoint, so it never delivered them at all. $_CAPSLOCK_ON was therefore
+     * stuck at 0 on a Mac no matter what the keyboard did, WAIT_FOR_CAPS_CHANGE
+     * could only ever time out, and OS detection read the silence as "this must
+     * be a Mac" for the wrong reason.
+     *
+     * OUT is 0x01: MSC already holds 0x02 and 0x82, HID IN keeps 0x81. */
+    TUD_HID_INOUT_DESCRIPTOR(ITF_NUM_HID, 4, HID_ITF_PROTOCOL_NONE, sizeof(s_hid_report),
+                             0x01, 0x81, 16, 1),
     /* string index 5, OUT 0x02 / IN 0x82, 64-byte packets */
     TUD_MSC_DESCRIPTOR(ITF_NUM_MSC, 5, 0x02, 0x82, 64),
 };
