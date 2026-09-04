@@ -677,6 +677,27 @@ bool bridge_write_payload(const char *name, const char *data, size_t len)
     lock(); scan_payloads(); load_selected(); unlock();
     return true;
 }
+/* Is this config line a secret?
+ *
+ * Matching the KEY for "pass" rather than listing field names means a field
+ * added later is protected by DEFAULT instead of by someone remembering to
+ * extend a list. That is exactly what went wrong: uplink_pass arrived with the
+ * Internet-uplink feature and was neither redacted when the console read the
+ * config nor stripped when the console wrote it to the card - so an upstream
+ * network password could be shown in a browser and written in clear text to
+ * removable media, which is the one thing this project says it never does. */
+static bool config_line_is_secret(const char *line)
+{
+    char key[40]; size_t n = 0;
+    while (line[n] && line[n] != '=' && n < sizeof(key) - 1) {
+        char c = line[n];
+        key[n] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+        n++;
+    }
+    key[n] = 0;
+    return strstr(key, "pass") != NULL;
+}
+
 void bridge_get_config_text(char *buf, size_t cap)
 {
     buf[0] = 0;
@@ -685,10 +706,16 @@ void bridge_get_config_text(char *buf, size_t cap)
     char line[160];
     sbuf_t sb; sbuf_init(&sb, buf, cap);
     while (fgets(line, sizeof(line), fp) && !sbuf_truncated(&sb)) {
-        const char *red = NULL;
-        if (strstr(line, "wifi_pass") == line || strstr(line, "wifi_password") == line) red = "wifi_pass=***\n";
-        else if (strstr(line, "admin_pass") == line || strstr(line, "admin_password") == line) red = "admin_pass=***\n";
-        sappend(&sb, "%s", red ? red : line);
+        if (config_line_is_secret(line)) {
+            /* Keep the key visible so the operator can see it is SET, and
+             * never the value. */
+            char key[40]; size_t k = 0;
+            while (line[k] && line[k] != '=' && k < sizeof(key) - 1) { key[k] = line[k]; k++; }
+            key[k] = 0;
+            sappend(&sb, "%s=***\n", key);
+        } else {
+            sappend(&sb, "%s", line);
+        }
     }
     fclose(fp);
 }
@@ -784,10 +811,8 @@ bool bridge_set_config(const char *text)
          * and this path would have put the live Wi-Fi key and console password
          * back into a plain text file, undoing the protection every other
          * writer respects. The values stay in NVS; the line is dropped. */
-        if (strstr(line, "wifi_pass") == line || strstr(line, "wifi_password") == line ||
-            strstr(line, "admin_pass") == line || strstr(line, "admin_password") == line)
-            continue;
-        else fprintf(fp, "%s\n", line);
+        if (config_line_is_secret(line)) continue;
+        fprintf(fp, "%s\n", line);
     }
     fclose(fp);
     /* reload live settings (layout/speed/dry take effect now; wifi/usb need reboot) */

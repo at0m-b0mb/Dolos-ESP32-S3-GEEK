@@ -102,6 +102,22 @@ static void reply(httpd_req_t *r, const char *status, const char *type, const ch
     httpd_resp_set_status(r, status);
     httpd_resp_set_type(r, type);
     httpd_resp_set_hdr(r, "X-Content-Type-Options", "nosniff");
+    /* This console arms a device that types into whoever is holding it, so the
+     * usual web defences are not decoration here.
+     *
+     * no-store: every response carries either a credential, a payload or device
+     *   state. None of it belongs in a browser cache or a proxy.
+     * DENY / frame-ancestors: a hidden frame could trick an authenticated
+     *   operator into clicking "arm and fire". That is the attack this device
+     *   most needs protecting from, and it costs one header.
+     * no-referrer: the address bar holds the device's address; it should not
+     *   leak to anywhere the operator browses next. */
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store, no-cache, must-revalidate, private");
+    httpd_resp_set_hdr(r, "Pragma", "no-cache");
+    httpd_resp_set_hdr(r, "X-Frame-Options", "DENY");
+    httpd_resp_set_hdr(r, "Referrer-Policy", "no-referrer");
+    httpd_resp_set_hdr(r, "Permissions-Policy",
+                       "camera=(), microphone=(), geolocation=(), usb=()");
     httpd_resp_sendstr(r, body);
 }
 static void reply_json(httpd_req_t *r, const char *status, const char *json)
@@ -507,7 +523,14 @@ static esp_err_t h_abort(httpd_req_t *r)
 extern const char CONSOLE_HTML[] asm("_binary_console_html_start");
 static esp_err_t h_root(httpd_req_t *r)
 {
-    httpd_resp_set_hdr(r, "Content-Security-Policy", "default-src 'self' 'unsafe-inline'");
+    /* The console loads NOTHING from anywhere else - no CDN, no font host, no
+     * external script - so it can forbid all of it outright. An injected tag
+     * then has nowhere to fetch from and no frame to sit in. */
+    httpd_resp_set_hdr(r, "Content-Security-Policy",
+                       "default-src 'self' 'unsafe-inline' data:; "
+                       "connect-src 'self'; img-src 'self' data:; "
+                       "object-src 'none'; base-uri 'none'; "
+                       "form-action 'self'; frame-ancestors 'none'");
     reply(r, "200 OK", "text/html", CONSOLE_HTML); return ESP_OK;
 }
 
