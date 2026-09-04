@@ -334,6 +334,22 @@ bool usb_hid_wait_mounted(uint32_t timeout_ms)
 bool usb_hid_wait_host_ready(uint32_t timeout_ms)
 {
     if (!tud_mounted()) return false;
+    /* Do NOT press CAPS LOCK on a host that never reports lock state.
+     *
+     * This handshake taps CAPS and waits for the LED to echo back. On macOS
+     * nothing ever echoes, so all it achieved was to toggle the operator's
+     * caps lock on, wait 600 ms, toggle it off, and wait another 400 ms - at
+     * the start of EVERY run. macOS debounces caps lock and swallows keys
+     * around the transition, so the payload's first lines were typed into a
+     * keyboard that was mid-flip, which is where the output was being shredded.
+     *
+     * The LED report is also how we recognise the host in the first place, so
+     * if none has arrived by now there is nothing to ask and nothing to learn.
+     * Skip it, and leave the user's keyboard alone. */
+    if (!s_led_report_seen) {
+        ESP_LOGI(TAG, "no lock-key channel on this host - skipping the handshake");
+        return false;
+    }
     const uint8_t before = s_leds;
     usb_hid_tap(0, HID_KEY_CAPS);                 /* ask the OS a question */
 

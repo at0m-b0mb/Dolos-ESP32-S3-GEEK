@@ -360,8 +360,11 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
         } else if (usb_hid_wait_host_ready(600)) {
             ilog_note("  host acknowledged the lock-key handshake: input stack is live\n");
         } else {
-            ilog_note("  ! no lock-key echo; host may not report synchronously\n");
-            vTaskDelay(pdMS_TO_TICKS(300));      /* fall back to a fixed pause */
+            /* No handshake available. Settle for a moment so the first
+             * keystroke does not race the host finishing its enumeration -
+             * this is the whole benefit the handshake used to provide. */
+            ilog_note("  no lock-key channel on this host; settling instead\n");
+            vTaskDelay(pdMS_TO_TICKS(400));
         }
     }
     ilog_note("  leds at start: 0x%02X (num=%d caps=%d)\n", usb_hid_leds(),

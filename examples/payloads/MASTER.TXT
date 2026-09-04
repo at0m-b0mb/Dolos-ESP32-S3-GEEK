@@ -13,7 +13,12 @@ REM
 REM  Open a plain text editor, click into it, then fire.
 REM ==========================================================
 DEFAULTDELAY 12
-DELAY 1500
+REM  A long settle before the first real line. Anything the host swallows
+REM  while it finishes enumerating is swallowed from the sacrificial line
+REM  below, not from a test result.
+DELAY 2500
+STRINGLN ....sync....
+DELAY 400
 STRINGLN ################ DOLOS MASTER TEST ################
 
 REM ==========================================================
@@ -157,6 +162,42 @@ VAR $d = 99
 END_IF
 END_WHILE
 STRINGLN if inside while.           expect 99  got $d
+
+REM ==========================================================
+REM  SECTION D2 - DEEP NESTING (the shape that overflowed the stack)
+REM ==========================================================
+ENTER
+STRINGLN --- D2. DEEP NESTING ---
+VAR $deep = 0
+VAR $o = 0
+WHILE ($o < 3)
+VAR $o = $o + 1
+VAR $m = 0
+WHILE ($m < 3)
+VAR $m = $m + 1
+IF ($m == 1) THEN
+VAR $deep = $deep + 1
+ELSE IF ($m == 2) THEN
+VAR $deep = $deep + 10
+ELSE IF ($m == 3) THEN
+VAR $deep = $deep + 100
+ELSE
+VAR $deep = $deep + 1000
+END_IF
+END_WHILE
+END_WHILE
+STRINGLN nested if-chain in loop.    expect 333 got $deep
+VAR $t1 = 0
+IF (1 == 1) THEN
+IF (2 == 2) THEN
+IF (3 == 3) THEN
+IF (4 == 4) THEN
+VAR $t1 = 4
+END_IF
+END_IF
+END_IF
+END_IF
+STRINGLN four levels of IF.         expect 4   got $t1
 
 REM ==========================================================
 REM  SECTION E - FUNCTIONS
@@ -470,4 +511,7 @@ STRINGLN N mouse, O edge cases.
 ENTER
 STRINGLN The lock-key test is NOT included: it blocks waiting for
 STRINGLN a key press and would stall this run. Use TB_LOCKKEYS.TXT.
+ENTER
+STRINGLN ....end....  nothing may appear after this line
+DELAY 600
 STOP_PAYLOAD
