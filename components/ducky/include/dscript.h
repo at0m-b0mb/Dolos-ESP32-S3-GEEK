@@ -103,6 +103,22 @@ typedef struct {
     /* +16: a block line is handed back with a "STRINGLN " prefix, so the
      * output is legitimately longer than the input line it came from. */
     char     out[DS_LINE_MAX + 16];
+    /* Two more line-sized scratch buffers that MUST NOT be locals.
+     *
+     * dscript_next() held two of these on the stack and match_end() a third,
+     * giving a 16.5 KB frame that calls an 8.3 KB one - about 24.7 KB, on a
+     * task with 6 KB. It smashed the stack on any payload whose control flow
+     * reached that path, which presented as the device freezing and then being
+     * reset by the watchdog. They live in the struct, which is on the PSRAM
+     * heap, so the frames become a few dozen bytes.
+     *
+     * cond: the IF / ELSE IF condition being evaluated. Safe to share between
+     *       the two, because the first is finished with before the chain walk
+     *       begins.
+     * scan: match_end()'s line buffer, separate because it is used WHILE cond
+     *       and work are both live. */
+    char     cond[DS_LINE_MAX];
+    char     scan[DS_LINE_MAX];
     char     work[DS_LINE_MAX];        /* line scratch - NOT on the stack */         /* expanded line handed to the caller */
     const char *err;                   /* non-NULL once the script is broken */
     /* Big enough for the longest message plus a full-length name, so an

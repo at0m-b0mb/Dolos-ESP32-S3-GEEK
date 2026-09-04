@@ -372,9 +372,9 @@ static uint16_t match_end(dscript_t *ds, uint16_t from,
                           const char *else_kw, bool stop_at_else)
 {
     int depth = 0;
-    char buf[DS_LINE_MAX];
+    char *buf = ds->scan;              /* not 8 KB of stack */
     for (uint16_t i = from + 1; i < ds->nlines; i++) {
-        get_line(ds, i, buf, sizeof(buf));
+        get_line(ds, i, buf, DS_LINE_MAX);
         const char *l = skip_ws(buf);
         if (starts_with_kw(l, open_kw))  { depth++; continue; }
         if (starts_with_kw(l, close_kw)) { if (depth == 0) return i; depth--; continue; }
@@ -534,9 +534,9 @@ bool dscript_init(dscript_t *ds, const char *text)
     {
         struct { const char *what; uint16_t line; } open[DS_MAX_DEPTH];
         int depth = 0;
-        char b[DS_LINE_MAX];
+        char *b = ds->cond;        /* not 8 KB of stack */
         for (uint16_t i = 0; i < ds->nlines; i++) {
-            get_line(ds, i, b, sizeof(b));
+            get_line(ds, i, b, DS_LINE_MAX)   /* b is a POINTER now */;
             const char *l = skip_ws(b);
             const char *opens = NULL, *closes = NULL;
             if      (starts_with_kw(l, "IF"))           opens  = "IF";
@@ -576,9 +576,9 @@ bool dscript_init(dscript_t *ds, const char *text)
     }
 
     /* pre-scan function definitions so a call can appear before the body */
-    char buf[DS_LINE_MAX];
+    char *buf = ds->scan;              /* not 8 KB of stack */
     for (uint16_t i = 0; i < ds->nlines; i++) {
-        get_line(ds, i, buf, sizeof(buf));
+        get_line(ds, i, buf, DS_LINE_MAX);
         const char *l = skip_ws(buf);
         if (!starts_with_kw(l, "FUNCTION")) continue;
         const char *name = skip_ws(l + 8);
@@ -750,8 +750,8 @@ const char *dscript_next(dscript_t *ds)
                 /* skip to the matching END_IF_DEFINED, respecting nesting */
                 int depth = 1;
                 while (ds->pc < ds->nlines && depth > 0) {
-                    char sk[DS_LINE_MAX];
-                    get_line(ds, ds->pc++, sk, sizeof(sk));
+                    char *sk = ds->cond;   /* not 8 KB of stack */
+                    get_line(ds, ds->pc++, sk, DS_LINE_MAX)   /* sk is a POINTER now */;
                     const char *t = skip_ws(sk);
                     if (starts_with_kw(t, "IF_DEFINED_TRUE") || starts_with_kw(t, "IF_DEFINED_FALSE")) depth++;
                     else if (starts_with_kw(t, "END_IF_DEFINED")) depth--;
@@ -769,8 +769,8 @@ const char *dscript_next(dscript_t *ds)
          * and stops the definition being typed as if it were the payload. */
         if (starts_with_kw(l, "BUTTON_DEF")) {
             while (ds->pc < ds->nlines) {
-                char sk[DS_LINE_MAX];
-                get_line(ds, ds->pc++, sk, sizeof(sk));
+                char *sk = ds->cond;   /* not 8 KB of stack */
+                get_line(ds, ds->pc++, sk, DS_LINE_MAX)   /* sk is a POINTER now */;
                 if (starts_with_kw(skip_ws(sk), "END_BUTTON")) break;
             }
             continue;
@@ -901,8 +901,8 @@ const char *dscript_next(dscript_t *ds)
         if (starts_with_kw(l, "IF")) {
             const char *cond = skip_ws(l + 2);
             /* tolerate the documented "IF <cond> THEN" form */
-            char c[DS_LINE_MAX];
-            snprintf(c, sizeof(c), "%s", cond);
+            char *c = ds->cond;        /* not 8 KB of stack */
+            snprintf(c, DS_LINE_MAX, "%s", cond);
             char *then = strstr(c, "THEN");
             if (!then) then = strstr(c, "then");
             if (then) *then = 0;
@@ -925,8 +925,9 @@ const char *dscript_next(dscript_t *ds)
                     ds->pc = (uint16_t)(j + 1);
                     break;
                 }
-                char c2[DS_LINE_MAX];
-                snprintf(c2, sizeof(c2), "%s", cond2);
+                /* Shares ds->cond: the first condition is finished with. */
+                char *c2 = ds->cond;
+                snprintf(c2, DS_LINE_MAX, "%s", cond2);
                 char *t2 = strstr(c2, "THEN");
                 if (!t2) t2 = strstr(c2, "then");
                 if (t2) *t2 = 0;
