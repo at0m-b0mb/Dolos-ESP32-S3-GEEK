@@ -301,7 +301,8 @@ static esp_err_t h_status(httpd_req_t *r)
 {
     auth_session_t *sess = require(r, PERM_VIEW, false);
     if (!sess) return ESP_OK;
-    char buf[512];
+    /* Room for the device status plus the session fields spliced in below. */
+    char buf[640];
     bridge_status_json(buf, sizeof(buf));
     /* Splice in how long this session has left, so the console can warn before
      * it logs someone out mid-edit rather than after. Polling status does NOT

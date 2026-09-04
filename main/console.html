@@ -702,6 +702,29 @@ $$("#nav button").forEach(b=>b.onclick=()=>{
 });
 
 function boot(){poll();loadPayloads();setInterval(poll,3000);}
+
+/* Resume a session that is still alive.
+ *
+ * The CSRF token used to live only in this page's memory, so a refresh threw
+ * it away and asked for the password again even though the session cookie had
+ * up to thirty minutes left. /api/status needs a session but no token, and now
+ * returns one - so ask it first, and only fall back to the login form if there
+ * really is no session. */
+async function resume(){
+  try{
+    const r = await fetch("/api/status", {credentials:"same-origin"});
+    if(!r.ok) return false;
+    const j = await r.json();
+    if(!j || !j.csrf) return false;
+    CSRF = j.csrf;
+    ROLE = j.role || ROLE;
+    show("app");
+    try{applyRole();}catch(e){console.error(e);}
+    try{boot();}catch(e){console.error(e);}
+    return true;
+  }catch(e){ return false; }
+}
+resume();
 show("login");
 </script>
 </body></html>
