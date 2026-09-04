@@ -53,6 +53,16 @@ static void ilog_open(const char *name, const payload_ctx_t *ctx)
 {
     s_ilog = fopen("/sdcard/DOLOS_INJECT.LOG", "a");
     if (!s_ilog) return;
+    /* A real buffer, and NO flush per keystroke.
+     *
+     * Every logged keystroke used to force an SD card write - a card
+     * transaction between one character and the next, on the task that is
+     * meant to be typing. That is the slowest thing in the injection path and
+     * it sits exactly where timing matters most. Buffered, the log costs
+     * almost nothing and is written in whole blocks; it is still closed
+     * properly at the end of the run, so nothing is lost. */
+    static char ilog_buf[2048];
+    setvbuf(s_ilog, ilog_buf, _IOFBF, sizeof(ilog_buf));
     s_ilog_t0 = ms_now();
     fprintf(s_ilog,
         "\n===== injection: payload=%s layout=%d os=%d dry=%d =====\n"
@@ -68,7 +78,7 @@ static void ilog_key(int idx, int line, uint8_t key, uint8_t mods)
             idx, (unsigned long)(ms_now() - s_ilog_t0), line, key, mods,
             printable_of(key, mods), usb_hid_last_retries(),
             usb_hid_last_ok() ? "sent" : "DROPPED");
-    fflush(s_ilog);
+    /* deliberately not flushed: see ilog_open() */
 }
 
 static void ilog_note(const char *fmt, ...)
