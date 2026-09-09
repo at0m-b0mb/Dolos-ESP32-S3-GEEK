@@ -2,6 +2,31 @@
 
 All notable changes to Dolos are documented here. Dates are ISO-8601.
 
+## [0.8.1] - 2026-09-09
+### Saved settings were silently dropped
+
+Saving `speed=reliable` wrote the file correctly and the device came back up in
+BALANCED. The write was never the problem: three separate call sites each read
+`DOLOS.CFG` into their own `char[512]`, and the file had grown to 691 bytes - a
+comment header plus the uplink, boot-log and storage settings added in 0.8.0.
+Everything past offset 511 was discarded without a word, and `speed=` begins at
+offset 500, so it straddled the cut and fell back to the default.
+
+```
+layout=   482  read
+os=       492  read
+speed=    500  TRUNCATED MID-VALUE at 511
+dryrun= armpin= wifi= ui_lock= uplink= bootlog= storage=   515-659  all lost
+```
+
+Three copies of the same reader is how it drifted, so there is one now, with a
+single size used for reading and writing alike - and it reports a short read
+instead of quietly parsing half a file. Half a config that looks whole is worse
+than no config.
+
+Every setting you save now survives a reboot: speed, layout, target OS,
+dry-run, default delay, arm PIN, Wi-Fi, UI lock, uplink, boot log and storage.
+
 ## [0.8.0] - 2026-09-04
 Everything here came from running the firmware on a real board against a real
 Mac. Most of it could not have been found any other way: the host tests were
