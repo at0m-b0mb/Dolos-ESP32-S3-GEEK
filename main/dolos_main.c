@@ -152,6 +152,7 @@ static void ensure_checked(void);
 static void heap_checkpoint(const char *stage);
 static bool sd_mount(void);
 static void scan_payloads(void);
+static bool config_read_file(dolos_config_t *c);
 
 /* Notice a card that was inserted AFTER boot.
  *
@@ -167,11 +168,7 @@ static void sd_hotplug_check(void)
     if (!sd_mount()) return;
     s_sd_ok = true;
     ESP_LOGW(TAG, "SD card inserted - reading it now");
-    FILE *fp = fopen("/sdcard/DOLOS.CFG", "r");
-    if (fp) {
-        char cbuf[512]; int n = (int)fread(cbuf, 1, sizeof(cbuf) - 1, fp); fclose(fp);
-        if (n > 0) { cbuf[n] = 0; config_parse(cbuf, &s_cfg); }
-    }
+    config_read_file(&s_cfg);
     usb_hid_set_speed(speed_key_delay_ms(s_cfg.speed));
     scan_payloads();
     load_selected();
@@ -509,10 +506,31 @@ static bool s_cfg_dirty;     /* changed but not yet written to the card */
 static bool s_info_reveal;   /* console screen: temporarily show a hidden password */
 
 /* Write the live settings back to /sdcard/DOLOS.CFG. */
+/* The one place DOLOS.CFG is read.
+ *
+ * There were three copies of this, each with its own char[512], and the file
+ * grew past that without any of them noticing - so settings were dropped in
+ * silence. A short read is now reported instead of guessed at. */
+static bool config_read_file(dolos_config_t *c)
+{
+    FILE *fp = fopen("/sdcard/DOLOS.CFG", "r");
+    if (!fp) return false;
+    static char cbuf[CONFIG_TEXT_MAX];
+    size_t n = fread(cbuf, 1, sizeof(cbuf) - 1, fp);
+    int extra = fgetc(fp);            /* is there MORE than we just read? */
+    fclose(fp);
+    cbuf[n] = 0;
+    if (extra != EOF)
+        ESP_LOGE(TAG, "DOLOS.CFG is larger than %u bytes - settings past that "
+                      "point were NOT loaded", (unsigned)(sizeof(cbuf) - 1));
+    if (n > 0) config_parse(cbuf, c);
+    return n > 0;
+}
+
 static bool config_save(void)
 {
     if (!s_sd_ok) return false;
-    char text[768];
+    char text[CONFIG_TEXT_MAX];
     size_t n = config_write_text(&s_cfg, text, sizeof(text));
     if (n == 0) return false;
     FILE *fp = fopen("/sdcard/DOLOS.CFG", "w");
@@ -830,9 +848,7 @@ bool bridge_set_config(const char *text)
     snprintf(keep_admin, sizeof(keep_admin), "%s", s_cfg.admin_pass);
 
     config_defaults(&s_cfg);
-    FILE *rf = fopen("/sdcard/DOLOS.CFG", "r");
-    if (rf) { char cb[512]; int m = (int)fread(cb, 1, sizeof(cb) - 1, rf); fclose(rf);
-              if (m > 0) { cb[m] = 0; config_parse(cb, &s_cfg); } }
+    config_read_file(&s_cfg);
     /* the file wins only if it actually set one */
     if (!s_cfg.wifi_pass[0])  snprintf(s_cfg.wifi_pass,  sizeof(s_cfg.wifi_pass),  "%s", keep_wifi);
     if (!s_cfg.admin_pass[0]) snprintf(s_cfg.admin_pass, sizeof(s_cfg.admin_pass), "%s", keep_admin);
@@ -1519,11 +1535,7 @@ void app_main(void)
     s_sd_ok = sd_mount();
     heap_checkpoint("sd_mount");
     if (s_sd_ok) {
-        FILE *fp = fopen("/sdcard/DOLOS.CFG", "r");
-        if (fp) {
-            char cbuf[512]; int n = (int)fread(cbuf, 1, sizeof(cbuf) - 1, fp); fclose(fp);
-            if (n > 0) { cbuf[n] = 0; config_parse(cbuf, &s_cfg); }
-        }
+        config_read_file(&s_cfg);
         scan_payloads();
     }
     /* One line per boot, always. This is deliberately NOT the opt-in boot log:

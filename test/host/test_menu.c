@@ -186,4 +186,47 @@ TEST_MAIN_BEGIN
         config_parse("os=detect\n", &back);
         CHECK(back.os_auto, "os=detect is accepted as a spelling of auto");
     }
+
+    SUITE("config: a FULL config survives being written and read back");
+    {
+        /* "speed=reliable" was written correctly, then truncated on the way
+         * back in because the readers used a 512-byte buffer and the file had
+         * grown to 691 - so it silently reverted to the default on every boot.
+         * The whole file must fit CONFIG_TEXT_MAX with room to spare. */
+        dolos_config_t c; config_defaults(&c);
+        c.speed = SPEED_RELIABLE;
+        c.layout = LAYOUT_DE;
+        c.os_auto = false; c.os = OS_MAC;
+        c.dry_run = true;
+        c.default_delay_ms = 33;
+        c.ui_lock = UI_LOCK_MENU;
+        c.sta_on = true; c.bootlog = true; c.msc_enabled = true; c.msc_partition = 2;
+        /* longest values the fields allow, so the worst case is measured */
+        memset(c.wifi_ssid, 'W', sizeof(c.wifi_ssid) - 1); c.wifi_ssid[sizeof(c.wifi_ssid)-1] = 0;
+        memset(c.sta_ssid,  'S', sizeof(c.sta_ssid) - 1);  c.sta_ssid[sizeof(c.sta_ssid)-1]  = 0;
+        memset(c.admin_user,'A', sizeof(c.admin_user) - 1);c.admin_user[sizeof(c.admin_user)-1]=0;
+        snprintf(c.arm_pin, sizeof(c.arm_pin), "12345678");
+
+        static char text[CONFIG_TEXT_MAX];
+        size_t n = config_write_text(&c, text, sizeof(text));
+        CHECK(n > 0, "a maximal config is written, %zu bytes", n);
+        CHECK(n < CONFIG_TEXT_MAX, "and fits the shared buffer with room (%zu of %d)",
+              n, CONFIG_TEXT_MAX);
+
+        dolos_config_t back; config_defaults(&back);
+        config_parse(text, &back);
+        CHECK(back.speed == SPEED_RELIABLE, "SPEED survives - the reported bug");
+        CHECK(back.layout == LAYOUT_DE, "layout survives");
+        CHECK(back.os == OS_MAC && !back.os_auto, "os survives");
+        CHECK(back.dry_run == true, "dry-run survives");
+        CHECK(back.default_delay_ms == 33, "default delay survives");
+        CHECK(back.ui_lock == UI_LOCK_MENU, "ui lock survives");
+        CHECK(back.sta_on && back.bootlog && back.msc_enabled, "uplink/bootlog/storage survive");
+        CHECK(back.msc_partition == 2, "storage partition survives");
+
+        /* And prove the old buffer really was the cause. */
+        char small[512];
+        size_t m = config_write_text(&c, small, sizeof(small));
+        CHECK(m == 0, "the same config does NOT fit 512 bytes - which is why it was lost");
+    }
 TEST_MAIN_END

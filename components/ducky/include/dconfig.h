@@ -16,6 +16,16 @@
 #include "layout.h"
 #include "ducky.h"   /* target_os_t */
 
+/* The buffer any DOLOS.CFG must fit in, for reading AND writing.
+ *
+ * Three separate call sites each read the file into their own char[512]. The
+ * file outgrew that - a comment header plus the uplink, boot-log and storage
+ * settings took it to 691 bytes - so everything past offset 511 was silently
+ * dropped, and "speed=reliable" happened to straddle the cut: it was written
+ * correctly, truncated on the way back in, and fell back to the default. One
+ * constant, used everywhere, with room to grow. */
+#define CONFIG_TEXT_MAX 2048
+
 typedef enum { SPEED_FAST = 0, SPEED_BALANCED = 1, SPEED_RELIABLE = 2 } dolos_speed_t;
 
 /* How much of the on-device UI the BOOT button may reach.
