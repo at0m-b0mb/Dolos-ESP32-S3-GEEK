@@ -135,6 +135,13 @@ static bool s_reload_pending;
  * hold away from happening by accident - which is exactly how it happened.
  * The first hold arms the action and says what it will destroy; only a second,
  * deliberate hold carries it out, and any other press cancels. */
+/* A message shown for a moment and then gone.
+ *
+ * Wrong PIN and PIN timeout both just returned to SAFE, so the operator saw the
+ * arm attempt evaporate with no reason given and no way to tell the two apart. */
+static const char *s_notice_t1, *s_notice_t2, *s_notice_t3;
+static uint32_t    s_notice_until;
+
 static menu_action_t s_confirm;          /* MENU_ACT_NONE = nothing pending */
 static const char *s_confirm_t1, *s_confirm_t2, *s_confirm_t3;
 
@@ -883,7 +890,23 @@ bool bridge_remote_select(const char *name)
 bool bridge_remote_fire_enabled(void) { return g_remote_fire_enabled; }
 void bridge_set_remote_fire_enabled(bool on)
 {
-    g_remote_fire_enabled = on;
+    /* ONE source of truth for the remote-fire gate.
+     *
+     * This used to set only the live flag and leave s_cfg.remote_fire alone, so
+     * the two disagreed the moment the console toggled it. Every later settings
+     * change runs config_apply_live(), which re-asserts s_cfg.remote_fire over
+     * the live flag - and the dangerous direction is the one that matters:
+     * an operator who switched remote fire OFF in the console had it switched
+     * back ON by an unrelated change to the layout or the typing speed. "Save
+     * to card" also wrote the stale value rather than the one they chose.
+     *
+     * Setting both under the lock means they cannot drift apart, whichever
+     * path runs next. */
+    lock();
+    s_cfg.remote_fire = on;
+    g_remote_fire_enabled = s_cfg.remote_fire;
+    s_cfg_dirty = true;                 /* so "save" persists what was chosen */
+    unlock();
     ESP_LOGW(TAG, "remote fire %s (via console)", on ? "ENABLED" : "disabled");
 }
 arm_result_t bridge_remote_arm(void)
@@ -1076,18 +1099,38 @@ static void ui_task(void *arg)
             }
             break;
         case DUI_PINENTRY:
-            if (e == BTN_TAP) { s_pin_cur = (s_pin_cur % 9) + 1; }
+            /* A fast tap arrives as BTN_DOUBLE, and this used to ignore it
+             * entirely - so dialling a digit by tapping quickly silently lost
+             * presses and the number on screen did not match the taps. A double
+             * is simply two advances. */
+            if (e == BTN_TAP)         { s_pin_cur = (s_pin_cur % 9) + 1;        stage_ms = t; }
+            else if (e == BTN_DOUBLE) { s_pin_cur = ((s_pin_cur + 1) % 9) + 1;  stage_ms = t; }
             else if (e == BTN_HOLD) {
                 if (s_pin_pos < (int)sizeof(s_pin_buf) - 1) s_pin_buf[s_pin_pos++] = (char)('0' + s_pin_cur);
                 s_pin_cur = 1;
+                stage_ms = t;
                 if (s_pin_pos >= (int)strlen(s_cfg.arm_pin)) {
                     s_pin_buf[s_pin_pos] = 0;
                     if (strcmp(s_pin_buf, s_cfg.arm_pin) == 0) { s_mode = DUI_ARMED; }
-                    else { ESP_LOGW(TAG, "wrong PIN"); s_mode = DUI_SAFE; }
-                    stage_ms = t;
+                    else {
+                        ESP_LOGW(TAG, "wrong PIN");
+                        s_notice_t1 = "WRONG PIN"; s_notice_t2 = "THE DEVICE STAYS SAFE";
+                        s_notice_t3 = "HOLD TO TRY AGAIN";
+                        s_notice_until = t + 1800;
+                        s_mode = DUI_SAFE;
+                    }
                 }
             }
-            else if (t - stage_ms > PIN_TMO_MS) { s_mode = DUI_SAFE; }
+            /* stage_ms is reset by every accepted press above, so this is an
+             * IDLE timeout. It used to be a total budget for the whole PIN:
+             * fifteen seconds to dial four digits, nine taps each, which is not
+             * enough time and gave up mid-entry with no explanation. */
+            else if (t - stage_ms > PIN_TMO_MS) {
+                s_notice_t1 = "PIN TIMED OUT"; s_notice_t2 = "NO PRESS FOR 15 SECONDS";
+                s_notice_t3 = "HOLD TO START AGAIN";
+                s_notice_until = t + 1800;
+                s_mode = DUI_SAFE;
+            }
             break;
         case DUI_ARMED:
             if (e == BTN_TAP) { s_mode = DUI_SAFE; }
@@ -1199,6 +1242,12 @@ static void ui_task(void *arg)
             const char *vol[] = { st.payload_name, st.lint_msg, st.run_fail_msg,
                                   st.wifi_ssid, st.wifi_key, st.admin_pw,
                                   st.admin_user, st.layout, st.speed };
+            /* An overlay is not part of dui_state_t, so without folding it in
+             * here the dirty check would decide nothing had changed and the
+             * message would never be drawn at all. */
+            bool notice_live = s_notice_until && (int32_t)(t - s_notice_until) < 0;
+            sig = (sig ^ (uint32_t)(notice_live ? 1u : 0u)) * 16777619u;
+            sig = (sig ^ (uint32_t)s_confirm) * 16777619u;
             for (unsigned i = 0; i < sizeof(vol) / sizeof(vol[0]); i++)
                 for (const char *q = vol[i]; q && *q; q++) {
                     sig ^= (uint8_t)*q; sig *= 16777619u;
@@ -1212,10 +1261,14 @@ static void ui_task(void *arg)
         static bool        drawn_once;
         if (cv && (!drawn_once || sig != prev_sig ||
                    memcmp(&st, &prev_st, sizeof(st)) != 0)) {
-            if (s_confirm != MENU_ACT_NONE)
+            if (s_notice_until && (int32_t)(t - s_notice_until) < 0)
+                dui_render_notice(cv, s_notice_t1, s_notice_t2, s_notice_t3);
+            else if (s_confirm != MENU_ACT_NONE)
                 dui_render_notice(cv, s_confirm_t1, s_confirm_t2, s_confirm_t3);
-            else
+            else {
+                if (s_notice_until) s_notice_until = 0;      /* it has expired */
                 dui_render(cv, &st);
+            }
             display_flush();
             prev_st = st; prev_sig = sig; drawn_once = true;
         }
