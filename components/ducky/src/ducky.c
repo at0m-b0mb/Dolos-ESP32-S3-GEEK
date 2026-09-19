@@ -112,6 +112,7 @@ void ducky_state_init(ducky_state_t *st)
     st->rng_state = 0x2545F491u;
     st->pending = NULL;
     st->pending_ln = false;
+    st->last_cmd_cut = false;
 }
 
 static int emit_string(const char *s, kb_layout_t layout, target_os_t os,
@@ -399,6 +400,7 @@ int ducky_parse_line(ducky_state_t *st, const char *line,
     }
 
     /* everything below is a real command; remember it for REPEAT */
+    st->last_cmd_cut = (strlen(buf) >= sizeof(st->last_cmd));
     strncpy(st->last_cmd, buf, sizeof(st->last_cmd) - 1);
     st->last_cmd[sizeof(st->last_cmd) - 1] = 0;
 

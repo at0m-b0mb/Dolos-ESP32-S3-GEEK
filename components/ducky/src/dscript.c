@@ -849,6 +849,7 @@ const char *dscript_next(dscript_t *ds)
                         if (ds->nret >= DS_MAX_DEPTH) { fail(ds, "functions nested too deeply"); return NULL; }
                         var_set(ds, name, 0);            /* declare it before the call */
                         snprintf(ds->ret_var[ds->nret], DS_DEF_NAME, "%s", name);
+                        ds->ret_nloop[ds->nret] = ds->nloop;   /* unwind these on RETURN */
                         ds->ret[ds->nret++] = ds->pc;
                         ds->pc = (uint16_t)(ds->fn[fi].line + 1);
                         continue;
@@ -886,6 +887,7 @@ const char *dscript_next(dscript_t *ds)
                         if (ds->nret >= DS_MAX_DEPTH) { fail(ds, "functions nested too deeply"); return NULL; }
                         /* remember WHERE the result goes, then call */
                         snprintf(ds->ret_var[ds->nret], DS_DEF_NAME, "%s", name);
+                        ds->ret_nloop[ds->nret] = ds->nloop;   /* unwind these on RETURN */
                         ds->ret[ds->nret++] = ds->pc;
                         ds->pc = (uint16_t)(ds->fn[fi].line + 1);
                         continue;
@@ -986,6 +988,8 @@ const char *dscript_next(dscript_t *ds)
             }
             ds->nret--;
             ds->ret_var[ds->nret][0] = 0;
+            /* Discard any loops the function opened and did not close. */
+            ds->nloop = ds->ret_nloop[ds->nret];
             ds->pc = ds->ret[ds->nret];
             continue;
         }
@@ -1000,7 +1004,8 @@ const char *dscript_next(dscript_t *ds)
                     if (!ieq(ds->fn[i].name, nm)) continue;
                     if (ds->nret >= DS_MAX_DEPTH) { fail(ds, "functions nested too deeply"); return NULL; }
                     ds->ret_var[ds->nret][0] = 0;
-                    ds->ret[ds->nret++] = ds->pc;
+                    ds->ret_nloop[ds->nret] = ds->nloop;   /* unwind these on RETURN */
+                        ds->ret[ds->nret++] = ds->pc;
                     ds->pc = (uint16_t)(ds->fn[i].line + 1);
                     goto continue_outer;
                 }

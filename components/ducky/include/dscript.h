@@ -83,6 +83,16 @@ typedef struct {
      * runs as a normal statement and RETURN assigns into this. */
     char     ret_var[DS_MAX_DEPTH][DS_DEF_NAME];
     uint16_t loop[DS_MAX_DEPTH]; uint8_t nloop;   /* WHILE line numbers    */
+    /* How deep the loop stack was when each call frame was pushed.
+     *
+     * RETURN out of a WHILE used to leave the loop entry behind, because the
+     * two stacks were independent and nothing tied a frame to a loop depth.
+     * The caller's own END_WHILE then popped the function's stale entry and
+     * jumped INTO the function body with no frame behind it; the RETURN there
+     * saw nret==0, read as "RETURN at top level", and ended the payload with
+     * no error at all - so the run reported success having typed the wrong
+     * keys and skipped the rest. Unwinding a call must unwind its loops. */
+    uint8_t  ret_nloop[DS_MAX_DEPTH];
 
     uint8_t  block;        /* inside STRING/END_STRING (1) or STRINGLN (2)   */
     /* Host facts the script can read as $_ system variables. The caller keeps

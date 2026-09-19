@@ -386,4 +386,53 @@ TEST_MAIN_BEGIN
         n = ducky_parse_line(&st, "ENTER", a, 8);
         CHECK(n == 1, "ENTER is still a single action");
     }
+
+    SUITE("REPEAT of a long STRING repeats the WHOLE line, not the first 192 actions");
+    {
+        /* The repeat path played only the actions the parse returned and then
+         * looped, and the next parse reset st.pending - so a 400-character
+         * STRING typed 400 once and 192 on every repetition. Typing 192
+         * characters of a 400-character command is a DIFFERENT command. */
+        ducky_state_t st; ducky_state_init(&st);
+        static ducky_action_t a[192];
+        char line[600]; int w = 0;
+        w += sprintf(line, "STRING ");
+        for (int i = 0; i < 400; i++) line[w++] = (char)('A' + (i % 26));
+        line[w] = 0;
+
+        int n = ducky_parse_line(&st, line, a, 192);
+        int first = 0;
+        for (int i = 0; i < n; i++) if (a[i].kind == DUCKY_KEY) first++;
+        while (st.pending) { int m = ducky_continue(&st, a, 192); if (m <= 0) break;
+                             for (int i = 0; i < m; i++) if (a[i].kind == DUCKY_KEY) first++; }
+        CHECK(first == 400, "the first pass types all 400, got %d", first);
+
+        ducky_parse_line(&st, "REPEAT 2", a, 192);
+        CHECK(st.repeat == 2, "REPEAT 2 is recorded");
+        CHECK(!st.last_cmd_cut, "and the target fitted, so it is not refused");
+        char saved[512]; snprintf(saved, sizeof(saved), "%s", st.last_cmd);
+        int reps = st.repeat;                       /* capture, as the player does */
+        for (int r = 0; r < reps; r++) {
+            int got = 0;
+            int m = ducky_parse_line(&st, saved, a, 192);
+            for (int i = 0; i < m; i++) if (a[i].kind == DUCKY_KEY) got++;
+            while (st.pending) { int q = ducky_continue(&st, a, 192); if (q <= 0) break;
+                                 for (int i = 0; i < q; i++) if (a[i].kind == DUCKY_KEY) got++; }
+            CHECK(got == 400, "repetition %d types all 400, got %d", r + 1, got);
+        }
+    }
+
+    SUITE("a REPEAT target too long to store is flagged, not silently shortened");
+    {
+        ducky_state_t st; ducky_state_init(&st);
+        static ducky_action_t a[192];
+        char line[1200]; int w = sprintf(line, "STRING ");
+        for (int i = 0; i < 1000; i++) line[w++] = 'x';
+        line[w] = 0;
+        ducky_parse_line(&st, line, a, 192);
+        CHECK(st.last_cmd_cut, "a 1000-character line does not fit the REPEAT store, and says so");
+
+        ducky_parse_line(&st, "STRING short", a, 192);
+        CHECK(!st.last_cmd_cut, "and the flag clears for a line that does fit");
+    }
 TEST_MAIN_END

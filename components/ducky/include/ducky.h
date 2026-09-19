@@ -67,7 +67,16 @@ typedef struct {
 
 typedef struct {
     uint32_t    default_delay_ms;/* inserted between commands (DEFAULTDELAY) */
-    char        last_cmd[512];    /* REPEAT target: a command, not a document */
+    /* REPEAT target: a command, not a document.
+     *
+     * Deliberately NOT the full 8 KB line size - this struct lives in internal
+     * RAM and there are two of them, so a line-sized field here would cost
+     * ~15 KB of the scarcest memory on the board to serve a case that does not
+     * occur. A line too long to store is REPORTED instead (see below), which is
+     * what matters: the old code strncpy-truncated it and repeated a shortened
+     * command with nothing said. */
+    char        last_cmd[512];
+    bool        last_cmd_cut;    /* the REPEAT target did not fit; refuse it */
     char        scratch[8192];   /* parse buffer, per caller - never on the stack */   /* remembered for REPEAT                    */
     int         repeat;          /* pending REPEAT count (player consumes)   */
     kb_layout_t layout;          /* target keyboard layout for STRING/chars  */

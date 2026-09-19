@@ -426,4 +426,73 @@ TEST_MAIN_BEGIN
               "ELSE_IF picks the matching branch, got %s", l ? l : "(nothing)");
         free(ds);
     }
+
+    SUITE("RETURN out of a WHILE unwinds that loop with the call");
+    {
+        /* The two stacks were independent, so a RETURN inside a loop left the
+         * loop entry behind. The caller's END_WHILE then popped the FUNCTION's
+         * stale entry and jumped into the function body with no frame; the
+         * RETURN there saw nret==0, read as "RETURN at top level", and ended
+         * the payload reporting success. Wrong keys, then a silent stop. */
+        dscript_t *ds = dscript_alloc();
+        CHECK(ds != NULL, "allocated");
+        CHECK(dscript_init(ds,
+            "VAR $i = 0\n"
+            "WHILE ($i < 2)\n"
+            "VAR $i = $i + 1\n"
+            "STRING loop\n"
+            "F()\n"
+            "END_WHILE\n"
+            "STRING done\n"
+            "FUNCTION F()\n"
+            "WHILE (1)\n"
+            "STRING inF\n"
+            "RETURN\n"
+            "END_WHILE\n"
+            "END_FUNCTION\n"), "payload parses");
+        /* dscript_next() hands back a pointer to its own reused buffer, so the
+         * lines must be COPIED - holding the pointers means holding five
+         * references to whatever was emitted last. */
+        char seen[10][64]; int n = 0;
+        const char *l;
+        while ((l = dscript_next(ds)) != NULL && n < 10) {
+            snprintf(seen[n], sizeof(seen[n]), "%s", l); n++;
+        }
+        CHECK(n == 5, "five lines execute, got %d", n);
+        CHECK(n == 5 && strstr(seen[0], "loop") != NULL, "1: outer loop");
+        CHECK(n == 5 && strstr(seen[1], "inF")  != NULL, "2: inside the function");
+        CHECK(n == 5 && strstr(seen[2], "loop") != NULL, "3: outer loop runs AGAIN");
+        CHECK(n == 5 && strstr(seen[3], "inF")  != NULL, "4: function again");
+        CHECK(n == 5 && strstr(seen[4], "done") != NULL, "5: the line after the loop is reached");
+        CHECK(dscript_error(ds) == NULL, "and no error");
+        free(ds);
+    }
+
+    SUITE("a function that loops can be called many times without exhausting depth");
+    {
+        /* Each leaked loop entry was permanent, so the same valid payload died
+         * after enough calls. */
+        dscript_t *ds = dscript_alloc();
+        CHECK(dscript_init(ds,
+            "VAR $n = 0\n"
+            "WHILE ($n < 40)\n"
+            "VAR $n = $n + 1\n"
+            "F()\n"
+            "END_WHILE\n"
+            "STRING finished\n"
+            "FUNCTION F()\n"
+            "WHILE (1)\n"
+            "RETURN\n"
+            "END_WHILE\n"
+            "END_FUNCTION\n"), "payload parses");
+        char last[64] = ""; const char *l;
+        int n = 0;
+        while ((l = dscript_next(ds)) != NULL && n < 200) {
+            snprintf(last, sizeof(last), "%s", l); n++;
+        }
+        CHECK(dscript_error(ds) == NULL, "40 calls do not exhaust the loop stack: %s",
+              dscript_error(ds) ? dscript_error(ds) : "ok");
+        CHECK(strstr(last, "finished") != NULL, "and the payload reaches the end, last=\"%s\"", last);
+        free(ds);
+    }
 TEST_MAIN_END

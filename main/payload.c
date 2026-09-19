@@ -205,6 +205,29 @@ static int g_ilog_idx;    /* keystroke counter for the injection log */
 static int g_ilog_line;   /* payload line currently being played          */
 
 static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
+                         const payload_ctx_t *ctx);
+
+/* Play one parsed line to completion, INCLUDING its continuation.
+ *
+ * A STRING longer than the action buffer parks its tail in st->pending for
+ * ducky_continue() to drain. The ordinary path did that; the REPEAT path did
+ * not - it played the first 192 actions and looped, and the next parse reset
+ * pending. So "STRING <400 chars>" + "REPEAT 2" typed 400 characters once and
+ * 192 twice, dropping 208 per repetition with nothing reported. Typing 192
+ * characters of a 400-character command is not a shorter command, it is a
+ * DIFFERENT one. Both paths go through here now, so they cannot drift again. */
+static void play_line(ducky_state_t *st_p, ducky_action_t *acts, int n,
+                      const payload_ctx_t *ctx)
+{
+    play_actions(acts, n, st_p->pending ? 0 : st_p->default_delay_ms, ctx);
+    while (st_p->pending && !(ctx->abort && *ctx->abort)) {
+        int m = ducky_continue(st_p, acts, 192);
+        if (m <= 0) break;
+        play_actions(acts, m, st_p->pending ? 0 : st_p->default_delay_ms, ctx);
+    }
+}
+
+static void play_actions(const ducky_action_t *a, int n, uint32_t default_delay,
                          const payload_ctx_t *ctx)
 {
     uint8_t held = 0;       /* modifiers held across keys (Unicode sequences) */
@@ -449,13 +472,21 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
         int n = ducky_parse_line(&st, line, acts, (int)(192));
         ilog_note("  line %d: \"%s\" -> %d action(s)\n", cur, line, n);
 
+        if (st.repeat > 0 && st.last_cmd_cut) {
+            /* Repeating a command we could not store in full would type a
+             * DIFFERENT command, n times. Say so and stop. */
+            ESP_LOGE(TAG, "line %d: REPEAT target is too long to store - refusing", cur);
+            ilog_note("  ! REPEAT refused: the line to repeat is too long\n");
+            payload_set_fail("REPEAT line too long");
+            break;
+        }
         if (st.repeat > 0) {
             char saved[512];
             strncpy(saved, st.last_cmd, sizeof(saved) - 1); saved[sizeof(saved) - 1] = 0;
             int reps = st.repeat;
             for (int r = 0; r < reps && !(ctx->abort && *ctx->abort); r++) {
                 int m = ducky_parse_line(&st, saved, acts, (int)(192));
-                play_actions(acts, m, st.default_delay_ms, ctx);
+                play_line(st_p, acts, m, ctx);     /* drains the tail too */
                 /* A long REPEAT froze the screen on one line number, which
                  * reads exactly like a hung device. The interpreter counts
                  * each repetition, so report them. */
@@ -464,16 +495,7 @@ int payload_run(const char *text, const payload_ctx_t *ctx)
             }
             cur--;                     /* the line itself was already counted */
         } else {
-            /* A STRING longer than the action buffer arrives in pieces. The
-             * default delay belongs at the END of the line, so it is applied
-             * only by the chunk that finishes it - not sprinkled through the
-             * middle of one long line of text. */
-            play_actions(acts, n, st.pending ? 0 : st.default_delay_ms, ctx);
-            while (st.pending && !(ctx->abort && *ctx->abort)) {
-                int m = ducky_continue(&st, acts, (int)(192));
-                if (m <= 0) break;
-                play_actions(acts, m, st.pending ? 0 : st.default_delay_ms, ctx);
-            }
+            play_line(st_p, acts, n, ctx);
         }
     }
     if (dscript_error(ds)) {
