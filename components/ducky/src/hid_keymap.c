@@ -109,8 +109,20 @@ bool hid_named_key(const char *tok, uint8_t *key)
     else if (ieq(tok, "MENU") || ieq(tok, "APP"))     k = HID_KEY_APPLICATION;
     else if (ieq(tok, "PRINTSCREEN") || ieq(tok, "PRTSCR")) k = HID_KEY_PRTSCR;
     else if ((tok[0] == 'F' || tok[0] == 'f') && tok[1]) {
-        int n = 0; for (const char *p = tok + 1; *p; p++) {
-            if (*p < '0' || *p > '9') { n = 0; break; } n = n * 10 + (*p - '0'); }
+        /* Stop accumulating well before int can overflow.
+         *
+         * "F999999999" made this compute 1399999999 * 10, which is signed
+         * overflow and therefore undefined - the compiler is entitled to
+         * produce anything, including a value that lands inside 1..24 and
+         * presses a function key the payload never asked for. The digits come
+         * from payload text, so this is reachable from a file on the card.
+         * Nothing above F24 exists, so refuse as soon as it cannot be one. */
+        int n = 0;
+        for (const char *p = tok + 1; *p; p++) {
+            if (*p < '0' || *p > '9') { n = 0; break; }
+            if (n > 99) { n = 0; break; }        /* far past F24; cannot overflow */
+            n = n * 10 + (*p - '0');
+        }
         if (n >= 1 && n <= 12)       k = (uint8_t)(HID_KEY_F1 + (n - 1));
         /* F13-F24 are real HID usages (0x68-0x73) and appear in payloads that
          * bind uncommon shortcuts. They used to make the whole line invalid. */

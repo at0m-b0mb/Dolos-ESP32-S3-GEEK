@@ -39,5 +39,13 @@ TEST_MAIN_BEGIN
         CHECK(hid_named_key("F24", &k) && k == 0x73, "F24 = 0x73");
         CHECK(!hid_named_key("F25", &k), "F25 is past the end of the row");
         CHECK(!hid_named_key("F0", &k), "there is no F0");
+        /* Found by fuzzing: "F999999999" overflowed int while accumulating the
+         * digits, which is undefined behaviour - the result could land inside
+         * 1..24 and press a function key the payload never asked for. The
+         * digits come from payload text, so this is reachable from the card. */
+        CHECK(!hid_named_key("F999999999", &k), "an absurd F number is refused, not overflowed");
+        CHECK(!hid_named_key("F2147483647", &k), "INT_MAX worth of digits is refused");
+        CHECK(!hid_named_key("F00000000000000000025", &k), "leading zeros do not overflow either");
+        CHECK(hid_named_key("F012", &k) && k == (HID_KEY_F1 + 11), "but F012 is still F12");
     }
 TEST_MAIN_END
